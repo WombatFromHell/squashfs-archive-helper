@@ -147,6 +147,95 @@ class TestMountTrackerErrorHandling:
             temp_file.unlink()
 
 
+class TestMountTrackerPathConflictHandling:
+    """Test path conflict handling in MountTracker."""
+
+    @pytest.fixture
+    def tracker(self, test_config):
+        """Create a MountTracker instance for testing with isolated temp dir."""
+        return MountTracker(test_config)
+
+    def test_same_named_files_different_paths(self, tracker):
+        """Test handling of files with same name but different paths."""
+        # Two files with same name but different paths
+        file_a = "/path/to/dir1/test.sqs"
+        file_b = "/path/to/dir2/test.sqs"
+        
+        mount_point_a = "/mnt/point1"
+        mount_point_b = "/mnt/point2"
+        
+        # Mount file_a
+        tracker.record_mount(file_a, mount_point_a)
+        
+        # file_a should be mounted
+        assert tracker.is_mounted(file_a)
+        info_a = tracker.get_mount_info(file_a)
+        assert info_a is not None
+        assert info_a[0] == str(Path(file_a).resolve())
+        
+        # file_b should NOT be considered mounted (different path)
+        assert not tracker.is_mounted(file_b)
+        
+        # Getting mount info for file_b should raise conflict error
+        with pytest.raises(SquashFSError, match="Tracking file conflict.*different files with the same name"):
+            tracker.get_mount_info(file_b)
+        
+        # Clean up file_a
+        tracker.record_unmount(file_a)
+        
+        # Now mount file_b
+        tracker.record_mount(file_b, mount_point_b)
+        
+        # file_b should be mounted
+        assert tracker.is_mounted(file_b)
+        info_b = tracker.get_mount_info(file_b)
+        assert info_b is not None
+        assert info_b[0] == str(Path(file_b).resolve())
+        
+        # file_a should NOT be considered mounted now
+        assert not tracker.is_mounted(file_a)
+        
+        # Getting mount info for file_a should raise conflict error
+        with pytest.raises(SquashFSError, match="Tracking file conflict.*different files with the same name"):
+            tracker.get_mount_info(file_a)
+        
+        # Clean up file_b
+        tracker.record_unmount(file_b)
+
+    def test_relative_vs_absolute_path_same_file(self, tracker):
+        """Test that relative and absolute paths to the same file work correctly."""
+        # Create a test file in the temp directory
+        test_file = Path(tracker.config.temp_dir) / "test.sqs"
+        test_file.touch()
+        
+        abs_path = str(test_file.resolve())
+        # For relative path, we'll use a path relative to temp_dir
+        rel_path = str(test_file.relative_to(tracker.config.temp_dir))
+        # But we need to make it absolute for the test to work
+        rel_path = str((Path(tracker.config.temp_dir) / rel_path).resolve())
+        
+        mount_point = "/mnt/test"
+        
+        # Mount using absolute path
+        tracker.record_mount(abs_path, mount_point)
+        
+        # Both paths should be considered mounted (they resolve to the same file)
+        assert tracker.is_mounted(abs_path)
+        assert tracker.is_mounted(rel_path)
+        
+        # Both should return the same mount info
+        info_abs = tracker.get_mount_info(abs_path)
+        info_rel = tracker.get_mount_info(rel_path)
+        
+        assert info_abs is not None
+        assert info_rel is not None
+        assert info_abs == info_rel
+        
+        # Clean up
+        tracker.record_unmount(abs_path)
+        test_file.unlink()
+
+
 class TestMountTrackerIOErrors:
     """Test IO error handling in MountTracker."""
 

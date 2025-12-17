@@ -10,20 +10,24 @@ build:
 	chmod +x $(OUT)
 
 install: $(OUT)
-	@if [ -d "$$HOME/.local/bin/scripts/" ]; then \
-		INSTALL_DIR="$$HOME/.local/bin/scripts"; \
+	REAL_HOME="$$(realpath "$$HOME")"; \
+	if [ -d "$$REAL_HOME/.local/bin/scripts/" ]; then \
+		INSTALL_DIR="$$REAL_HOME/.local/bin/scripts"; \
 	else \
-		mkdir -p "$$HOME/.local/bin"; \
-		INSTALL_DIR="$$HOME/.local/bin"; \
+		mkdir -p "$$REAL_HOME/.local/bin"; \
+		INSTALL_DIR="$$REAL_HOME/.local/bin"; \
 	fi; \
 	cp $(OUT) "$$INSTALL_DIR/mount-squashfs.pyz"; \
 	chmod +x "$$INSTALL_DIR/mount-squashfs.pyz"; \
-	ln -sf "$$INSTALL_DIR/mount-squashfs.pyz" "$$HOME/.local/bin/mount-squashfs"; \
+	ln -sf "$$INSTALL_DIR/mount-squashfs.pyz" "$$REAL_HOME/.local/bin/mount-squashfs"; \
 	echo "Installed to $$INSTALL_DIR/mount-squashfs.pyz"; \
-	mkdir -p "$$HOME/.local/share/kio/servicemenus/"; \
-	cp -f squashfs-actions.desktop "$$HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"; \
+	cp squish.sh "$$INSTALL_DIR/squish.sh"; \
+	chmod +x "$$INSTALL_DIR/squish.sh"; \
+	ln -sf "$$INSTALL_DIR/squish.sh" "$$REAL_HOME/.local/bin/squish"; \
+	mkdir -p "$$REAL_HOME/.local/share/kio/servicemenus/"; \
+	cp -f squashfs-actions.desktop "$$REAL_HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"; \
 	kbuildsycoca5 --noincremental; \
-	echo "Installed servicemenu to $$HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"
+	echo "Installed servicemenu to $$REAL_HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"
 
 test:
 	uv run pytest -xvs --cov=src --cov-report=term-missing --cov-branch

@@ -37,7 +37,17 @@ class MountTracker:
                     sqs_file = f.readline().strip()
                     mount_point = f.readline().strip()
                     if sqs_file and mount_point:
-                        return (sqs_file, mount_point)
+                        # Validate that the stored path matches the requested file
+                        requested_path = str(Path(file_path).resolve())
+                        if sqs_file == requested_path:
+                            return (sqs_file, mount_point)
+                        else:
+                            # Path conflict: tracking file exists but is for a different file
+                            raise SquashFSError(
+                                f"Tracking file conflict: {temp_file} exists for {sqs_file}, "
+                                f"but requested operation on {requested_path}. "
+                                f"These appear to be different files with the same name."
+                            )
             except IOError as e:
                 raise SquashFSError(f"Could not read mount info from {temp_file}: {e}")
         return None
@@ -64,7 +74,13 @@ class MountTracker:
 
     def is_mounted(self, file_path: str) -> bool:
         """Check if a file is currently mounted."""
-        return self._get_temp_file_path(file_path).exists()
+        try:
+            # Check if tracking file exists AND contains the correct path
+            mount_info = self.get_mount_info(file_path)
+            return mount_info is not None
+        except SquashFSError:
+            # If there's a conflict or other error, the file is not properly mounted
+            return False
 
     def get_mount_info(self, file_path: str) -> Optional[Tuple[str, str]]:
         """Get mount information for a file if it's mounted."""
