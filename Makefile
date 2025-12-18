@@ -2,7 +2,8 @@ PY = python3
 SRC_DIR = src
 BUILD_DIR = dist
 ENTRY = entry:main
-OUT = $(BUILD_DIR)/mount-squashfs.pyz
+PKG = squish
+OUT = $(BUILD_DIR)/$(PKG).pyz
 
 build:
 	mkdir -p $(BUILD_DIR)
@@ -17,13 +18,10 @@ install: $(OUT)
 		mkdir -p "$$REAL_HOME/.local/bin"; \
 		INSTALL_DIR="$$REAL_HOME/.local/bin"; \
 	fi; \
-	cp $(OUT) "$$INSTALL_DIR/mount-squashfs.pyz"; \
-	chmod +x "$$INSTALL_DIR/mount-squashfs.pyz"; \
-	ln -sf "$$INSTALL_DIR/mount-squashfs.pyz" "$$REAL_HOME/.local/bin/mount-squashfs"; \
-	echo "Installed to $$INSTALL_DIR/mount-squashfs.pyz"; \
-	cp squish.sh "$$INSTALL_DIR/squish.sh"; \
-	chmod +x "$$INSTALL_DIR/squish.sh"; \
-	ln -sf "$$INSTALL_DIR/squish.sh" "$$REAL_HOME/.local/bin/squish"; \
+	cp $(OUT) "$$INSTALL_DIR/$(PKG).pyz"; \
+	chmod +x "$$INSTALL_DIR/$(PKG).pyz"; \
+	ln -sf "$$INSTALL_DIR/$(PKG).pyz" "$$REAL_HOME/.local/bin/$(PKG)"; \
+	echo "Installed to $$INSTALL_DIR/$(PKG).pyz"; \
 	mkdir -p "$$REAL_HOME/.local/share/kio/servicemenus/"; \
 	cp -f squashfs-actions.desktop "$$REAL_HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"; \
 	kbuildsycoca5 --noincremental; \
@@ -46,7 +44,7 @@ format: prettier
 quality: lint format
 
 radon:
-	uv run radon cc ./src/mount_squashfs/ -a
+	uv run radon cc ./src/$(PKG)/ -a
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +; \

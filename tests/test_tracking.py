@@ -6,12 +6,11 @@ This module tests the mount tracking functionality.
 
 import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from mount_squashfs.errors import SquashFSError
-from mount_squashfs.tracking import MountTracker
+from squish.errors import SquashFSError
+from squish.tracking import MountTracker
 
 
 class TestMountTracker:
@@ -160,45 +159,51 @@ class TestMountTrackerPathConflictHandling:
         # Two files with same name but different paths
         file_a = "/path/to/dir1/test.sqs"
         file_b = "/path/to/dir2/test.sqs"
-        
+
         mount_point_a = "/mnt/point1"
         mount_point_b = "/mnt/point2"
-        
+
         # Mount file_a
         tracker.record_mount(file_a, mount_point_a)
-        
+
         # file_a should be mounted
         assert tracker.is_mounted(file_a)
         info_a = tracker.get_mount_info(file_a)
         assert info_a is not None
         assert info_a[0] == str(Path(file_a).resolve())
-        
+
         # file_b should NOT be considered mounted (different path)
         assert not tracker.is_mounted(file_b)
-        
+
         # Getting mount info for file_b should raise conflict error
-        with pytest.raises(SquashFSError, match="Tracking file conflict.*different files with the same name"):
+        with pytest.raises(
+            SquashFSError,
+            match="Tracking file conflict.*different files with the same name",
+        ):
             tracker.get_mount_info(file_b)
-        
+
         # Clean up file_a
         tracker.record_unmount(file_a)
-        
+
         # Now mount file_b
         tracker.record_mount(file_b, mount_point_b)
-        
+
         # file_b should be mounted
         assert tracker.is_mounted(file_b)
         info_b = tracker.get_mount_info(file_b)
         assert info_b is not None
         assert info_b[0] == str(Path(file_b).resolve())
-        
+
         # file_a should NOT be considered mounted now
         assert not tracker.is_mounted(file_a)
-        
+
         # Getting mount info for file_a should raise conflict error
-        with pytest.raises(SquashFSError, match="Tracking file conflict.*different files with the same name"):
+        with pytest.raises(
+            SquashFSError,
+            match="Tracking file conflict.*different files with the same name",
+        ):
             tracker.get_mount_info(file_a)
-        
+
         # Clean up file_b
         tracker.record_unmount(file_b)
 
@@ -207,30 +212,30 @@ class TestMountTrackerPathConflictHandling:
         # Create a test file in the temp directory
         test_file = Path(tracker.config.temp_dir) / "test.sqs"
         test_file.touch()
-        
+
         abs_path = str(test_file.resolve())
         # For relative path, we'll use a path relative to temp_dir
         rel_path = str(test_file.relative_to(tracker.config.temp_dir))
         # But we need to make it absolute for the test to work
         rel_path = str((Path(tracker.config.temp_dir) / rel_path).resolve())
-        
+
         mount_point = "/mnt/test"
-        
+
         # Mount using absolute path
         tracker.record_mount(abs_path, mount_point)
-        
+
         # Both paths should be considered mounted (they resolve to the same file)
         assert tracker.is_mounted(abs_path)
         assert tracker.is_mounted(rel_path)
-        
+
         # Both should return the same mount info
         info_abs = tracker.get_mount_info(abs_path)
         info_rel = tracker.get_mount_info(rel_path)
-        
+
         assert info_abs is not None
         assert info_rel is not None
         assert info_abs == info_rel
-        
+
         # Clean up
         tracker.record_unmount(abs_path)
         test_file.unlink()
@@ -292,24 +297,28 @@ class TestMountTrackerIOErrors:
                 else:
                     temp_file.unlink()
 
-    def test_remove_mount_info_os_error(self, tracker):
+    def test_remove_mount_info_os_error(self, tracker, mocker):
         """Test OSError handling in _remove_mount_info."""
-        file_path = "/path/to/test.sqs"
-        temp_file = tracker._get_temp_file_path(file_path)
+        file_path = "test.sqs"
 
-        # Create a file
-        with open(temp_file, "w") as f:
-            f.write("test content")
+        # Mock the _get_temp_file_path to return a mock Path object
+        mock_temp_file = mocker.MagicMock()
+        mock_temp_file.exists.return_value = True
 
-        # Mock os.unlink to raise OSError
-        with patch(
-            "mount_squashfs.tracking.Path.unlink",
-            side_effect=OSError("Permission denied"),
-        ):
-            # This should raise SquashFSError
-            with pytest.raises(SquashFSError, match="Could not remove mount info file"):
-                tracker._remove_mount_info(file_path)
+        # Mock the unlink method to raise OSError
+        mock_temp_file.unlink.side_effect = OSError("Permission denied")
 
-        # Clean up the actual file
-        if temp_file.exists():
-            temp_file.unlink()
+        mocker.patch.object(tracker, "_get_temp_file_path", return_value=mock_temp_file)
+
+        # Mock the logger to verify it's called correctly
+        mock_logger = mocker.MagicMock()
+        tracker.logger = mock_logger
+
+        # This should raise SquashFSError due to the OSError
+        with pytest.raises(SquashFSError, match="Could not remove mount info file"):
+            tracker._remove_mount_info(file_path)
+
+        # Verify the logger was called with failure
+        mock_logger.log_tracking_operation.assert_called_once_with(
+            file_path, "remove", success=False
+        )

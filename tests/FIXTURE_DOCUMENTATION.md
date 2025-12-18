@@ -1,6 +1,6 @@
 # Test Fixture Documentation
 
-This document provides comprehensive documentation for the test fixtures and parametrization strategy used in the mount-squashfs-helper test suite.
+This document provides comprehensive documentation for the test fixtures and parametrization strategy used in the squish test suite.
 
 ## Overview
 
@@ -14,42 +14,13 @@ All fixtures are centralized in `tests/conftest.py` and are organized into sever
 
 These provide fundamental test infrastructure:
 
-- **`temp_dir`**: Creates a temporary directory for tests
 - **`test_config`**: Provides a test configuration with isolated temp directory
-- **`test_tracker`**: Creates a MountTracker instance for testing
-- **`test_manager`**: Creates a SquashFSManager instance for testing
 
-### 2. Parametrized File Fixtures
-
-These fixtures create test files with different characteristics:
-
-- **`mock_squashfs_file(file_extension)`**: Creates files with different extensions (.sqs, .squashfs)
-- **`mock_file_with_content(file_type, content)`**: Creates files with different content types (empty, small, binary)
-- **`mock_file_with_permissions(permission)`**: Creates files with specific permissions (0o000, 0o400, 0o600, 0o777)
-
-### 3. Parametrized Configuration Fixtures
-
-These provide different configuration scenarios:
-
-- **`parametrized_config(config_params)`**: Tests different configuration combinations
-- **`mock_invalid_paths()`**: Provides invalid paths for error testing
-
-### 4. Error Scenario Fixtures
-
-These create specific error conditions:
-
-- **`mock_error_scenarios(error_scenario)`**: Creates various error scenarios (nonexistent files, invalid permissions, etc.)
-- **`mock_mount_error_scenarios(mount_error_type)`**: Creates mount-specific error scenarios
-
-### 5. Isolation and Cleanup Fixtures
+### 2. Test Environment Fixtures
 
 These ensure test isolation and proper cleanup:
 
 - **`clean_test_environment`** (autouse): Automatically cleans up test artifacts
-- **`isolated_test_environment`**: Provides complete environment isolation
-- **`parametrized_cleanup_strategy(cleanup_strategy)`**: Tests different cleanup approaches
-- **`test_environment_isolation`**: Ensures complete isolation between tests
-- **`mock_system_environment`**: Mocks system environment variables
 
 ## Parametrization Strategy
 
@@ -62,16 +33,7 @@ These ensure test isolation and proper cleanup:
 
 ### Parametrization Patterns Used
 
-#### 1. Fixture Parametrization
-
-```python
-@pytest.fixture
-@pytest.mark.parametrize("file_extension", [".sqs", ".squashfs"])
-def mock_squashfs_file(temp_dir, file_extension):
-    # Creates files with different extensions
-```
-
-#### 2. Test Method Parametrization
+#### 1. Test Method Parametrization
 
 ```python
 @pytest.mark.parametrize("invalid_path", [
@@ -84,7 +46,7 @@ def test_invalid_path_handling(self, test_manager, invalid_path):
     # Tests the same logic with different invalid paths
 ```
 
-#### 3. Combined Parametrization
+#### 2. Combined Parametrization
 
 ```python
 @pytest.mark.parametrize("mount_base,auto_cleanup", [
@@ -101,37 +63,12 @@ def test_mount_scenarios(self, temp_dir, mount_base, auto_cleanup):
 ### Basic Usage
 
 ```python
-def test_basic_mount(test_manager, mock_squashfs_file):
+def test_basic_mount(test_config):
     """Test basic mount functionality."""
-    manager = test_manager
-    file_path = mock_squashfs_file
-    
+    config = test_config
+
     # Test logic here
-    assert Path(file_path).exists()
-```
-
-### Parametrized Usage
-
-```python
-def test_file_extensions(mock_squashfs_file):
-    """Test that will run for each file extension."""
-    file_path = mock_squashfs_file
-    
-    # This test runs twice - once for .sqs, once for .squashfs
-    assert file_path.endswith((".sqs", ".squashfs"))
-```
-
-### Error Scenario Testing
-
-```python
-def test_error_handling(test_manager, mock_error_scenarios):
-    """Test error handling for various scenarios."""
-    manager = test_manager
-    error_path = mock_error_scenarios
-    
-    # Test that errors are handled appropriately
-    with pytest.raises((MountError, MountPointError)):
-        manager.mount(error_path)
+    assert config.mount_base == "test_mounts"
 ```
 
 ## Best Practices
@@ -150,7 +87,14 @@ def test_error_handling(test_manager, mock_error_scenarios):
 - **Keep tests independent**: Each test should be able to run in isolation
 - **Use appropriate assertions**: Be specific about what you're testing
 
-### 3. Parametrization Guidelines
+### 3. Mocking Guidelines
+
+- **Mock system dependencies**: Use mocking to avoid external dependencies in unit tests
+- **Clear mock behavior**: Make it obvious what the mock is doing in each test
+- **Verify mock calls**: When appropriate, verify that expected system calls are made
+- **Isolate functionality**: Use mocks to test specific functionality without side effects
+
+### 4. Parametrization Guidelines
 
 - **Test meaningful variations**: Only parametrize when there are meaningful differences
 - **Keep parameter sets manageable**: Avoid combinatorial explosions
@@ -159,30 +103,43 @@ def test_error_handling(test_manager, mock_error_scenarios):
 
 ## Test Coverage Strategy
 
-The parametrized approach ensures comprehensive coverage of:
+The fixture-based approach ensures comprehensive coverage of:
+
+### Configuration Scenarios
+- Different mount base directories
+- Auto-cleanup enabled/disabled
+- Different temp directories
+
+### System Operations
+- Mount operations
+- Unmount operations
+- Checksum verification
+- Build operations
+- List operations
+- Dependency checking
+
+### Error Conditions
+- Dependency check failures
+- Mount failures
+- Unmount failures
+- Build failures
+- List failures
+- Checksum verification failures
+- Invalid file paths
+- Invalid mount points
 
 ### File Types and Formats
 - Different file extensions (.sqs, .squashfs)
 - Various file content types
 - Different file permissions
-
-### Configuration Scenarios
-- Different mount base directories
-- Auto-cleanup enabled/disabled
-- Verbose mode on/off
-
-### Error Conditions
-- Nonexistent files
-- Invalid permissions
-- Invalid paths
-- Filesystem errors
-- Mount point issues
+- Files with and without checksums
 
 ### Edge Cases
+- Nonexistent files
+- Empty files
+- Files with content
 - Special characters in filenames
 - Deep directory structures
-- Empty files
-- Binary content
 - Various permission settings
 
 ## Running Parametrized Tests
@@ -190,8 +147,8 @@ The parametrized approach ensures comprehensive coverage of:
 When running tests, you'll see output like:
 
 ```
-tests/test_parametrized_examples.py::TestParametrizedFileExtensions::test_mount_different_extensions[.sqs] PASSED
-tests/test_parametrized_examples.py::TestParametrizedFileExtensions::test_mount_different_extensions[.squashfs] PASSED
+tests/test_config.py::TestConfigScenario::test_mount_base[True] PASSED
+tests/test_config.py::TestConfigScenario::test_mount_base[False] PASSED
 ```
 
 This shows that the same test ran multiple times with different parameters.
@@ -215,11 +172,12 @@ This shows that the same test ran multiple times with different parameters.
 
 ## Conclusion
 
-The centralized fixture approach with comprehensive parametrization provides:
+The centralized fixture approach with comprehensive parametrization and mocking provides:
 
 - **Thorough testing**: Covers a wide range of scenarios and edge cases
 - **Maintainable code**: Reduces duplication and makes tests easier to understand
 - **Flexibility**: Easy to add new test cases and scenarios
 - **Reliability**: Proper isolation and cleanup between tests
+- **Fast execution**: Mocked system calls avoid dependencies on external tools
 
-This strategy ensures that the mount-squashfs-helper is robustly tested while keeping the test code clean and maintainable.
+This strategy ensures that the squish utility is robustly tested while keeping the test code clean and maintainable.

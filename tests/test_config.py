@@ -8,7 +8,7 @@ import tempfile
 
 import pytest
 
-from mount_squashfs.config import SquashFSConfig, get_default_config
+from squish.config import SquashFSConfig, get_default_config
 
 
 class TestSquashFSConfig:

@@ -64,3 +64,39 @@ class UnmountCommandExecutionError(CommandExecutionError, UnmountError):
     """Exception raised when unmount command execution fails."""
 
     pass
+
+
+class ChecksumError(SquashFSError):
+    """Exception raised when checksum verification fails."""
+
+    pass
+
+
+class ChecksumCommandExecutionError(CommandExecutionError, ChecksumError):
+    """Exception raised when checksum command execution fails."""
+
+    pass
+
+
+class BuildError(SquashFSError):
+    """Exception raised when build operations fail."""
+
+    pass
+
+
+class ListError(SquashFSError):
+    """Exception raised when list operations fail."""
+
+    pass
+
+
+class MksquashfsCommandExecutionError(CommandExecutionError, BuildError):
+    """Exception raised when mksquashfs command execution fails."""
+
+    pass
+
+
+class UnsquashfsCommandExecutionError(CommandExecutionError, ListError):
+    """Exception raised when unsquashfs command execution fails."""
+
+    pass

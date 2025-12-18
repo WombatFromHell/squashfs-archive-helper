@@ -7,24 +7,31 @@ mount-squashfs functionality.
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 
 @dataclass
 class SquashFSConfig:
     """
-    Configuration for the SquashFS mounting system.
+    Configuration for the SquashFS management system.
 
     Attributes:
         mount_base: Base directory name for mount points (default: "mounts")
         temp_dir: Directory for temporary tracking files (default: "/tmp")
         auto_cleanup: Automatically clean up mount directories (default: True)
         verbose: Enable verbose output (default: False)
+        compression: Default compression algorithm for build operations (default: "zstd")
+        block_size: Default block size for build operations (default: "1M")
+        processors: Default number of processors for build operations (default: None for auto)
     """
 
     mount_base: str = "mounts"
     temp_dir: str = "/tmp"
     auto_cleanup: bool = True
     verbose: bool = False
+    compression: str = "zstd"
+    block_size: str = "1M"
+    processors: Optional[int] = None
 
     def __post_init__(self):
         """Validate configuration values after initialization."""

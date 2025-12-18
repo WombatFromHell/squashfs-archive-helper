@@ -1,7 +1,7 @@
 [project]
-name = "mount-squashfs-helper"
-description = "Utilize squashfs filesystem archives as fuser mounts with squashfuse"
-version = "1.0.0"
+name = "squish"
+description = "SquashFS archive management tool - build, mount, unmount, and list SquashFS archives"
+version = "1.1.0"
 requires-python = ">=3.13"
 dependencies = [
   "pytest>=9.0.2",
@@ -16,6 +16,5 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = "src"
 testpaths = ["tests"]
-addopts = "--cov=src/mount_squashfs --cov-report=term-missing --cov-branch -v"
+addopts = "--cov=src/squish --cov-report=term-missing --cov-branch -v"
 filterwarnings = "ignore::DeprecationWarning"
-markers = "slow: mark tests as slow\nintegration: mark tests as integration tests\nunit: mark tests as unit tests"

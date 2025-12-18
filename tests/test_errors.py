@@ -4,7 +4,7 @@ Test cases for the errors module.
 This module tests the custom exception classes.
 """
 
-from mount_squashfs.errors import (
+from squish.errors import (
     CommandExecutionError,
     ConfigError,
     DependencyError,

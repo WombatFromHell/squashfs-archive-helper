@@ -23,7 +23,7 @@ def main():
     """
     try:
         # Import the CLI from our refactored package
-        from mount_squashfs.cli import main as cli_main
+        from squish.cli import main as cli_main
 
         # Run the CLI
         return cli_main()

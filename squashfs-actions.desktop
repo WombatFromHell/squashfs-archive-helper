@@ -10,9 +10,9 @@ Icon=archive
 [Desktop Action mount-squashfs]
 Name=Mount
 Icon=media-optical-mount
-Exec=mount-squashfs %f
+Exec=squish mount %f
 
 [Desktop Action unmount-squashfs]
 Name=Unmount
 Icon=tools-media-optical-erase
-Exec=mount-squashfs -u %f
+Exec=squish unmount %f
