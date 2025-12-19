@@ -11,7 +11,7 @@ from typing import Optional
 
 
 @dataclass
-class SquashFSConfig:
+class SquishFSConfig:
     """
     Configuration for the SquashFS management system.
 
@@ -50,6 +50,6 @@ class SquashFSConfig:
             raise ValueError(f"temp_dir is not a directory: {self.temp_dir}")
 
 
-def get_default_config() -> SquashFSConfig:
+def get_default_config() -> SquishFSConfig:
     """Get the default configuration."""
-    return SquashFSConfig()
+    return SquishFSConfig()

@@ -119,6 +119,15 @@ class MountSquashFSLogger:
         """
         self.logger.error(f"File not found: {file_path}")
 
+    def log_directory_not_found(self, dir_path: str, context: str = "build") -> None:
+        """Log directory not found error.
+
+        Args:
+            dir_path: Path to the missing directory
+            context: Context where the directory was expected (build etc.)
+        """
+        self.logger.error(f"Directory not found: {dir_path}")
+
     def log_mount_point_not_found(
         self, mount_point: str, context: str = "unmount"
     ) -> None:

@@ -7,7 +7,7 @@ This module handles tracking of mounted squashfs files using temporary files.
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .config import SquashFSConfig
+from .config import SquishFSConfig
 from .errors import SquashFSError
 from .logging import get_logger
 
@@ -20,7 +20,7 @@ class MountTracker:
     that store information about mounted squashfs files.
     """
 
-    def __init__(self, config: SquashFSConfig):
+    def __init__(self, config: SquishFSConfig):
         self.config = config
         self.logger = get_logger(self.config.verbose)
 

@@ -16,11 +16,6 @@ from squish.tracking import MountTracker
 class TestMountTracker:
     """Test the MountTracker class."""
 
-    @pytest.fixture
-    def tracker(self, test_config):
-        """Create a MountTracker instance for testing with isolated temp dir."""
-        return MountTracker(test_config)
-
     def test_temp_file_path(self, tracker):
         """Test that temp file paths are generated correctly."""
         temp_file = tracker._get_temp_file_path("/path/to/test.sqs")

@@ -29,11 +29,6 @@ class TestMountSquashFSLoggerInitialization:
 class TestMountSquashFSLoggerMountOperations:
     """Test mount operation logging."""
 
-    @pytest.fixture
-    def logger(self):
-        """Create a logger instance for testing."""
-        return MountSquashFSLogger("test_logger", verbose=False)
-
     def test_log_mount_start(self, logger, mocker):
         """Test logging mount start operation."""
         mock_info = mocker.patch.object(logger.logger, "info")
@@ -120,6 +115,12 @@ class TestMountSquashFSLoggerFileOperations:
         mock_warning = mocker.patch.object(logger.logger, "warning")
         logger.log_mount_point_empty("/mnt/empty")
         mock_warning.assert_called_once_with("Mount point empty: /mnt/empty")
+
+    def test_log_directory_not_found(self, logger, mocker):
+        """Test logging directory not found error."""
+        mock_error = mocker.patch.object(logger.logger, "error")
+        logger.log_directory_not_found("/nonexistent/dir", "build")
+        mock_error.assert_called_once_with("Directory not found: /nonexistent/dir")
 
 
 class TestMountSquashFSLoggerDependencyOperations:

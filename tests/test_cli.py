@@ -146,19 +146,43 @@ class TestValidation:
             # Should not raise an exception
             validate_file_exists(temp_file.name)
 
-    def test_validate_file_exists_failure(self):
-        """Test file validation failure."""
+    @pytest.mark.parametrize(
+        "validation_func,invalid_path",
+        [
+            (validate_file_exists, "/nonexistent/file.sqs"),
+            (validate_directory_exists, "/nonexistent/directory"),
+        ],
+    )
+    def test_validation_functions_failure(self, validation_func, invalid_path):
+        """Test validation function failures with nonexistent paths."""
         with pytest.raises(SystemExit):
-            validate_file_exists("/nonexistent/file.sqs")
+            validation_func(invalid_path)
 
-    def test_validate_file_exists_failure_no_logger(self, mocker):
-        """Test file validation failure when logger is None (prints error message)."""
+    @pytest.mark.parametrize(
+        "validation_func,invalid_path,expected_message",
+        [
+            (
+                validate_file_exists,
+                "/nonexistent/file.sqs",
+                "File not found: /nonexistent/file.sqs",
+            ),
+            (
+                validate_directory_exists,
+                "/nonexistent/directory",
+                "Directory not found: /nonexistent/directory",
+            ),
+        ],
+    )
+    def test_validation_functions_failure_no_logger(
+        self, mocker, validation_func, invalid_path, expected_message
+    ):
+        """Test validation function failures when logger is None (prints error message)."""
         mock_print = mocker.patch("builtins.print")
         with pytest.raises(SystemExit):
-            validate_file_exists("/nonexistent/file.sqs", logger=None)
+            validation_func(invalid_path, logger=None)
 
         # Verify that the error message was printed
-        mock_print.assert_called_with("File not found: /nonexistent/file.sqs")
+        mock_print.assert_called_with(expected_message)
 
     def test_validate_directory_exists_success(self):
         """Test successful directory validation."""
@@ -166,29 +190,9 @@ class TestValidation:
             # Should not raise an exception
             validate_directory_exists(temp_dir)
 
-    def test_validate_directory_exists_failure(self):
-        """Test directory validation failure."""
-        with pytest.raises(SystemExit):
-            validate_directory_exists("/nonexistent/directory")
-
-    def test_validate_directory_exists_failure_no_logger(self, mocker):
-        """Test directory validation failure when logger is None (prints error message)."""
-        mock_print = mocker.patch("builtins.print")
-        with pytest.raises(SystemExit):
-            validate_directory_exists("/nonexistent/directory", logger=None)
-
-        # Verify that the error message was printed
-        mock_print.assert_called_with("Directory not found: /nonexistent/directory")
-
 
 class TestCLIHandlers:
     """Test CLI handler functions."""
-
-    @pytest.fixture
-    def mock_manager(self, mocker):
-        """Create a mock manager."""
-        manager = mocker.MagicMock()
-        return manager
 
     def test_handle_mount_operation_success(self, mock_manager):
         """Test successful mount operation handling."""
@@ -1024,7 +1028,7 @@ class TestCLICoverageGaps:
         mock_logger = mocker.patch("squish.cli.get_logger_from_args")
         mock_config = mocker.patch("squish.cli.get_config_from_args")
         mock_manager = mocker.patch("squish.cli.SquashFSManager")
-        mocker.patch("squish.cli.validate_file_exists")
+        mock_validate = mocker.patch("squish.cli.validate_file_exists")
 
         mock_args = mocker.MagicMock()
         mock_args.command = "mount"
@@ -1039,16 +1043,16 @@ class TestCLICoverageGaps:
         main()
 
         # Verify validate_file_exists was called (line 241)
-        #             mock_validate.assert_called_once_with(
-        #                 "test.sqs", "mount", mock_logger.return_value
-        #             )
+        mock_validate.assert_called_once_with(
+            "test.sqs", "mount", mock_logger.return_value
+        )
 
         # Test check command (lines 245-246)
         mock_parse = mocker.patch("squish.cli.parse_args")
         mock_logger = mocker.patch("squish.cli.get_logger_from_args")
         mock_config = mocker.patch("squish.cli.get_config_from_args")
         mock_manager = mocker.patch("squish.cli.SquashFSManager")
-        mocker.patch("squish.cli.validate_file_exists")
+        mock_validate = mocker.patch("squish.cli.validate_file_exists")
         mock_handle = mocker.patch("squish.cli.handle_check_operation")
 
         mock_args = mocker.MagicMock()
@@ -1063,30 +1067,170 @@ class TestCLICoverageGaps:
         main()
 
         # Verify validate_file_exists was called (line 245)
-        #             mock_validate.assert_called_once_with(
-        #                 "test.sqs", "check", mock_logger.return_value
-        #             )
+        mock_validate.assert_called_once_with(
+            "test.sqs", "check", mock_logger.return_value
+        )
         # Verify handle_check_operation was called (line 246)
         mock_handle.assert_called_once_with(
             mock_manager.return_value, "test.sqs", mock_logger.return_value
         )
 
-        from squish.cli import main
+    def test_validation_functions_with_logger_coverage(self, mocker):
+        """Test validation functions with logger to cover lines 108-109, 119-121."""
+        from squish.cli import validate_directory_exists, validate_file_exists
 
-        # Test KeyboardInterrupt without logger (line 270)
-        mock_parse = mocker.patch("squish.cli.parse_args")
-        mock_print = mocker.patch("builtins.print")
+        mock_logger = mocker.MagicMock()
+
+        # Test validate_file_exists with logger (lines 108-109)
+        mock_logger.log_file_not_found = mocker.MagicMock()
+        mocker.patch("os.path.isfile", return_value=False)
         mock_exit = mocker.patch("sys.exit")
-        mock_parse.side_effect = KeyboardInterrupt()
-        main()
-        mock_print.assert_called_once_with("\nOperation cancelled by user")
+        validate_file_exists("nonexistent.sqs", "mount", logger=mock_logger)
+        mock_logger.log_file_not_found.assert_called_once_with(
+            "nonexistent.sqs", "mount"
+        )
         mock_exit.assert_called_once_with(1)
 
-        # Test Exception without logger (line 276)
-        mock_parse = mocker.patch("squish.cli.parse_args")
-        mock_print = mocker.patch("builtins.print")
+        # Test validate_directory_exists with logger (lines 119-121)
+        mock_logger.log_directory_not_found = mocker.MagicMock()
+        mocker.patch("os.path.isdir", return_value=False)
         mock_exit = mocker.patch("sys.exit")
-        mock_parse.side_effect = Exception("Unexpected error")
+        validate_directory_exists("nonexistent_dir", "build", logger=mock_logger)
+        mock_logger.log_directory_not_found.assert_called_once_with(
+            "nonexistent_dir", "build"
+        )
+        mock_exit.assert_called_once_with(1)
+
+    def test_operation_handlers_with_logger_coverage(self, mocker):
+        """Test operation handlers with logger to cover lines 134-135, 149-151, 169-171, 205-207, 217-219."""
+        from squish.cli import (
+            handle_build_operation,
+            handle_check_operation,
+            handle_list_operation,
+            handle_mount_operation,
+            handle_unmount_operation,
+        )
+        from squish.errors import BuildError, ListError, SquashFSError
+
+        mock_manager = mocker.MagicMock()
+        mock_logger = mocker.MagicMock()
+
+        # Test handle_mount_operation with logger (lines 134-135)
+        mock_logger.log_mount_failed = mocker.MagicMock()
+        mock_manager.mount.side_effect = SquashFSError("Mount failed")
+        mock_exit = mocker.patch("sys.exit")
+        handle_mount_operation(
+            mock_manager, "test.sqs", "/mnt/point", logger=mock_logger
+        )
+        mock_logger.log_mount_failed.assert_called_once_with(
+            "test.sqs", "/mnt/point", "Mount failed"
+        )
+        mock_exit.assert_called_once_with(1)
+
+        # Test handle_unmount_operation with logger (lines 149-151)
+        mock_logger.log_unmount_failed = mocker.MagicMock()
+        mock_manager.unmount.side_effect = SquashFSError("Unmount failed")
+        mock_exit = mocker.patch("sys.exit")
+        handle_unmount_operation(
+            mock_manager, "test.sqs", "/mnt/point", logger=mock_logger
+        )
+        mock_logger.log_unmount_failed.assert_called_once_with(
+            "test.sqs", "/mnt/point", "Unmount failed"
+        )
+        mock_exit.assert_called_once_with(1)
+
+        # Test handle_check_operation with logger (lines 169-171)
+        mock_logger.logger = mocker.MagicMock()
+        mock_manager.verify_checksum.side_effect = SquashFSError("Checksum failed")
+        mock_exit = mocker.patch("sys.exit")
+        handle_check_operation(mock_manager, "test.sqs", logger=mock_logger)
+        mock_logger.logger.error.assert_called_once_with("Checksum failed")
+        mock_exit.assert_called_once_with(1)
+
+        # Test handle_build_operation with logger (lines 205-207)
+        mock_logger.logger = mocker.MagicMock()
+        mock_manager.build_squashfs.side_effect = BuildError("Build failed")
+        mock_exit = mocker.patch("sys.exit")
+        handle_build_operation(
+            mock_manager, "source_dir", "output.sqs", logger=mock_logger
+        )
+        mock_logger.logger.error.assert_called_once_with("Build failed: Build failed")
+        mock_exit.assert_called_once_with(1)
+
+        # Test handle_list_operation with logger (lines 217-219)
+        mock_logger.logger = mocker.MagicMock()
+        mock_manager.list_squashfs.side_effect = ListError("List failed")
+        mock_exit = mocker.patch("sys.exit")
+        handle_list_operation(mock_manager, "archive.sqs", logger=mock_logger)
+        mock_logger.logger.error.assert_called_once_with(
+            "List operation failed: List failed"
+        )
+        mock_exit.assert_called_once_with(1)
+
+    def test_main_with_keyboard_interrupt_with_logger_coverage(self, mocker):
+        """Test main function keyboard interrupt with logger to cover lines 274-276."""
+        from squish.cli import main
+
+        # Set up the entire main function with proper mocking
+        mock_args = mocker.MagicMock()
+        mock_args.command = "mount"
+        mock_args.file = "test.sqs"
+        mock_args.mount_point = None
+
+        # Create a mock logger with a mock logger.logger
+        mock_logger = mocker.MagicMock()
+        mock_logger.logger = mocker.MagicMock()
+        mock_parse_args = mocker.patch("squish.cli.parse_args")
+        mock_parse_args.return_value = mock_args  # First return args normally
+        mocker.patch("squish.cli.get_logger_from_args", return_value=mock_logger)
+        mocker.patch("squish.cli.get_config_from_args")
+        mocker.patch("squish.cli.SquashFSManager")
+        mocker.patch("squish.cli.validate_file_exists")
+
+        # Cause an exception in the operation handling to trigger the exception handling with logger
+        mock_manager = mocker.MagicMock()
+        mocker.patch("squish.cli.SquashFSManager", return_value=mock_manager)
+        mock_manager.mount.side_effect = KeyboardInterrupt()
+
+        mock_exit = mocker.patch("sys.exit")
         main()
-        mock_print.assert_called_once_with("Unexpected error: Unexpected error")
+
+        # Verify keyboard interrupt message was logged (line 276)
+        mock_logger.logger.info.assert_called_once_with("Operation cancelled by user")
+        # Verify sys.exit was called (line 277)
+        mock_exit.assert_called_once_with(1)
+
+    def test_main_with_unexpected_error_with_logger_coverage(self, mocker):
+        """Test main function unexpected error with logger to cover lines 280-282."""
+        from squish.cli import main
+
+        # Set up the entire main function with proper mocking
+        mock_args = mocker.MagicMock()
+        mock_args.command = "mount"
+        mock_args.file = "test.sqs"
+        mock_args.mount_point = None
+
+        # Create a mock logger with a mock logger.logger
+        mock_logger = mocker.MagicMock()
+        mock_logger.logger = mocker.MagicMock()
+        mock_parse_args = mocker.patch("squish.cli.parse_args")
+        mock_parse_args.return_value = mock_args  # First return args normally
+        mocker.patch("squish.cli.get_logger_from_args", return_value=mock_logger)
+        mocker.patch("squish.cli.get_config_from_args")
+        mocker.patch("squish.cli.SquashFSManager")
+        mocker.patch("squish.cli.validate_file_exists")
+
+        # Cause an exception in the operation handling to trigger the exception handling with logger
+        mock_manager = mocker.MagicMock()
+        mocker.patch("squish.cli.SquashFSManager", return_value=mock_manager)
+        mock_manager.mount.side_effect = Exception("Unexpected error")
+
+        mock_exit = mocker.patch("sys.exit")
+        main()
+
+        # Verify error message was logged (line 282)
+        mock_logger.logger.error.assert_called_once_with(
+            "Unexpected error: Unexpected error"
+        )
+        # Verify sys.exit was called (line 284)
         mock_exit.assert_called_once_with(1)

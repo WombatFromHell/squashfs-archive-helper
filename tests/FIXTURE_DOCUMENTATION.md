@@ -10,17 +10,27 @@ The test suite uses a centralized fixture approach with comprehensive parametriz
 
 All fixtures are centralized in `tests/conftest.py` and are organized into several categories:
 
-### 1. Basic Fixtures
+### 1. Basic Infrastructure Fixtures
 
 These provide fundamental test infrastructure:
 
 - **`test_config`**: Provides a test configuration with isolated temp directory
-
-### 2. Test Environment Fixtures
-
-These ensure test isolation and proper cleanup:
-
 - **`clean_test_environment`** (autouse): Automatically cleans up test artifacts
+
+### 2. Core Component Fixtures
+
+These create core component instances with proper test configuration:
+
+- **`tracker`**: Creates a MountTracker instance for testing with isolated temp directory (uses `test_config` fixture)
+- **`logger`**: Creates a MountSquashFSLogger instance for testing
+- **`mock_manager`**: Creates a mocked manager object for testing interactions with mocked dependencies
+
+### 3. Fixture Dependencies
+
+Some fixtures depend on others:
+
+- The `tracker` fixture depends on the `test_config` fixture to ensure isolated test environments
+- The `mock_manager` fixture depends on pytest's built-in `mocker` fixture for creating mock objects
 
 ## Parametrization Strategy
 

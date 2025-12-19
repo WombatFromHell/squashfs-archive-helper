@@ -10,7 +10,7 @@ import os
 import sys
 from typing import Optional
 
-from .config import SquashFSConfig
+from .config import SquishFSConfig
 from .core import SquashFSManager
 from .errors import BuildError, ListError, SquashFSError
 from .logging import get_logger
@@ -76,6 +76,9 @@ def parse_args() -> argparse.Namespace:
     build_parser.add_argument(
         "-p", "--processors", type=int, help="Number of processors (default: auto)"
     )
+    build_parser.add_argument(
+        "--kdialog", action="store_true", help="Show kdialog progress bar during build"
+    )
 
     # List command
     list_parser = subparsers.add_parser(
@@ -86,9 +89,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def get_config_from_args(args: argparse.Namespace) -> SquashFSConfig:
+def get_config_from_args(args: argparse.Namespace) -> SquishFSConfig:
     """Get configuration based on command line arguments."""
-    config = SquashFSConfig()
+    config = SquishFSConfig()
     if args.verbose:
         config.verbose = True
     return config
@@ -115,7 +118,9 @@ def validate_directory_exists(
     """Validate that the directory exists."""
     if not os.path.isdir(dir_path):
         if logger:
-            logger.logger.error(f"Directory not found: {dir_path}")
+            logger.log_directory_not_found(
+                dir_path, operation
+            )  # Use the appropriate logging method
         else:
             print(f"Directory not found: {dir_path}")
         sys.exit(1)
@@ -182,6 +187,7 @@ def handle_build_operation(
     compression: str = "zstd",
     block_size: str = "1M",
     processors: int | None = None,
+    kdialog: bool = False,
     logger=None,
 ) -> None:
     """Handle the build operation."""
@@ -196,6 +202,7 @@ def handle_build_operation(
             compression=compression,
             block_size=block_size,
             processors=processors,
+            kdialog=kdialog,
         )
     except BuildError as e:
         if logger:
@@ -258,6 +265,7 @@ def main() -> None:
                 compression=args.compression,
                 block_size=args.block_size,
                 processors=args.processors,
+                kdialog=args.kdialog,
                 logger=logger,
             )
 

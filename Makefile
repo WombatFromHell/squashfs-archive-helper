@@ -28,7 +28,7 @@ install: $(OUT)
 	echo "Installed servicemenu to $$REAL_HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"
 
 test:
-	uv run pytest -xvs --cov=src --cov-report=term-missing --cov-branch
+	uv run pytest -xvs --cov=src --cov-report=term-missing --cov-branch --tb=short
 
 lint:
 	ruff check ./src ./tests; \

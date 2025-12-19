@@ -42,12 +42,12 @@ classDiagram
         +verify_checksum()
         +build_squashfs()
         +list_squashfs()
-        +_check_dependencies()
-        +_check_linux_dependencies()
-        +_check_build_dependencies()
-        +_validate_checksum_files()
-        +_parse_checksum_file()
-        +_execute_checksum_command()
+    }
+
+    class Mounting {
+        +MountManager()
+        +mount()
+        +unmount()
         +_is_mount_point_valid()
         +_determine_mount_point()
         +_create_mount_directory()
@@ -55,14 +55,40 @@ classDiagram
         +_execute_mount_command()
         +_execute_unmount_command()
         +_cleanup_mount_directory()
+    }
+
+    class Build {
+        +BuildManager()
+        +build_squashfs()
         +_build_exclude_arguments()
         +_execute_mksquashfs_command()
+        +_run_mksquashfs_with_progress_service()
+    }
+
+    class Checksum {
+        +ChecksumManager()
+        +verify_checksum()
+        +_validate_checksum_files()
+        +_parse_checksum_file()
+        +_execute_checksum_command()
         +_generate_checksum()
+    }
+
+    class List {
+        +ListManager()
+        +list_squashfs()
         +_execute_unsquashfs_list()
     }
 
+    class Dependencies {
+        +check_commands()
+        +check_linux_dependencies()
+        +check_build_dependencies()
+        +check_all_dependencies()
+    }
+
     class Config {
-        +SquashFSConfig()
+        +SquishFSConfig()
         +get_default_config()
         +mount_base
         +temp_dir
@@ -128,11 +154,41 @@ classDiagram
         +log_validation_result()
     }
 
+    class Progress {
+        +ProgressHandler
+        +KdialogProgressHandler
+        +NoopProgressHandler
+        +CommandRunner
+        +DefaultCommandRunner
+        +MockCommandRunner
+        +ProgressParser
+        +ProgressService
+        +start_progress()
+        +update_progress()
+        +cancel_progress()
+        +complete_progress()
+        +run_mksquashfs_with_progress()
+    }
+
     CLI --> Core : Uses
-    Core --> Config : Uses
-    Core --> Errors : Uses
-    Core --> Tracking : Uses
-    Core --> Logging : Uses
+    Core --> Mounting : Uses
+    Core --> Build : Uses
+    Core --> Checksum : Uses
+    Core --> List : Uses
+    Core --> Dependencies : Uses
+    Mounting --> Config : Uses
+    Mounting --> Tracking : Uses
+    Mounting --> Logging : Uses
+    Build --> Config : Uses
+    Build --> Logging : Uses
+    Build --> Progress : Uses
+    Checksum --> Config : Uses
+    Checksum --> Logging : Uses
+    List --> Config : Uses
+    List --> Logging : Uses
+    Dependencies --> Config : Uses
+    Dependencies --> Logging : Uses
+    Progress --> Logging : Uses
 ```
 
 ### CLI Commands and Options
@@ -161,6 +217,7 @@ The CLI module provides a comprehensive command-line interface with the followin
     - `-c, --compression`: Compression algorithm (default: zstd)
     - `-b, --block-size`: Block size (default: 1M)
     - `-p, --processors`: Number of processors (default: auto)
+    - `--kdialog`: Show kdialog progress bar during build
 
 - **ls**: List contents of a SquashFS archive
   - `ls <archive>`
@@ -175,16 +232,16 @@ The CLI module provides a comprehensive command-line interface with the followin
 sequenceDiagram
     participant User
     participant CLI
-    participant Core
+    participant Checksum
     participant System
 
     User->>CLI: Run squish check file.sqs
-    CLI->>Core: verify_checksum(file.sqs)
-    Core->>System: Validate files exist and are in same directory
-    Core->>System: Parse checksum file to ensure target filename exists
-    Core->>System: Execute sha256sum -c command
-    System-->>Core: Return verification result
-    Core-->>CLI: Return success/failure
+    CLI->>Checksum: verify_checksum(file.sqs)
+    Checksum->>System: Validate files exist and are in same directory
+    Checksum->>System: Parse checksum file to ensure target filename exists
+    Checksum->>System: Execute sha256sum -c command
+    System-->>Checksum: Return verification result
+    Checksum-->>CLI: Return success/failure
     CLI-->>User: Display result
 ```
 
@@ -194,21 +251,22 @@ sequenceDiagram
 sequenceDiagram
     participant User
     participant CLI
-    participant Core
+    participant Mounting
+    participant Dependencies
     participant Tracking
     participant System
 
     User->>CLI: Run squish mount file.sqs /mount/point
-    CLI->>Core: mount(file.sqs, /mount/point)
-    Core->>System: Check dependencies (squashfuse, fusermount)
-    Core->>Tracking: Check if already mounted
-    Core->>System: Determine mount point (auto or specified)
-    Core->>System: Validate mount point availability
-    Core->>System: Create mount directory
-    Core->>System: Execute squashfuse mount command
-    Core->>Tracking: Record mount information
-    System-->>Core: Return mount status
-    Core-->>CLI: Return success/failure
+    CLI->>Mounting: mount(file.sqs, /mount/point)
+    Mounting->>Dependencies: Check dependencies (squashfuse, fusermount)
+    Mounting->>Tracking: Check if already mounted
+    Mounting->>System: Determine mount point (auto or specified)
+    Mounting->>System: Validate mount point availability
+    Mounting->>System: Create mount directory
+    Mounting->>System: Execute squashfuse mount command
+    Mounting->>Tracking: Record mount information
+    System-->>Mounting: Return mount status
+    Mounting-->>CLI: Return success/failure
     CLI-->>User: Display result
 ```
 
@@ -218,19 +276,19 @@ sequenceDiagram
 sequenceDiagram
     participant User
     participant CLI
-    participant Core
+    participant Mounting
     participant Tracking
     participant System
 
     User->>CLI: Run squish unmount file.sqs
-    CLI->>Core: unmount(file.sqs)
-    Core->>Tracking: Check if mounted and get mount info
-    Core->>System: Validate mount point exists and is not empty
-    Core->>System: Execute fusermount unmount command
-    Core->>System: Clean up mount directory (if auto_cleanup enabled)
-    Core->>Tracking: Remove mount tracking file
-    System-->>Core: Return unmount status
-    Core-->>CLI: Return success/failure
+    CLI->>Mounting: unmount(file.sqs)
+    Mounting->>Tracking: Check if mounted and get mount info
+    Mounting->>System: Validate mount point exists and is not empty
+    Mounting->>System: Execute fusermount unmount command
+    Mounting->>System: Clean up mount directory (if auto_cleanup enabled)
+    Mounting->>Tracking: Remove mount tracking file
+    System-->>Mounting: Return unmount status
+    Mounting-->>CLI: Return success/failure
     CLI-->>User: Display result
 ```
 
@@ -240,20 +298,21 @@ sequenceDiagram
 sequenceDiagram
     participant User
     participant CLI
-    participant Core
+    participant Build
+    participant Dependencies
     participant System
 
     User->>CLI: Run squish build source_dir output.sqs
-    CLI->>Core: build_squashfs(source_dir, output.sqs, options)
-    Core->>System: Check dependencies (mksquashfs, unsquashfs, nproc)
-    Core->>System: Validate source directory exists
-    Core->>System: Validate output file doesn't exist
-    Core->>System: Determine processor count (auto or specified)
-    Core->>System: Build exclude arguments from patterns
-    Core->>System: Execute mksquashfs command with options
-    Core->>System: Generate SHA256 checksum file
-    System-->>Core: Return build status
-    Core-->>CLI: Return success/failure
+    CLI->>Build: build_squashfs(source_dir, output.sqs, options)
+    Build->>Dependencies: Check dependencies (mksquashfs, unsquashfs, nproc)
+    Build->>System: Validate source directory exists
+    Build->>System: Validate output file doesn't exist
+    Build->>System: Determine processor count (auto or specified)
+    Build->>System: Build exclude arguments from patterns
+    Build->>System: Execute mksquashfs command with options
+    Build->>System: Generate SHA256 checksum file
+    System-->>Build: Return build status
+    Build-->>CLI: Return success/failure
     CLI-->>User: Display result
 ```
 
@@ -263,16 +322,17 @@ sequenceDiagram
 sequenceDiagram
     participant User
     participant CLI
-    participant Core
+    participant List
+    participant Dependencies
     participant System
 
     User->>CLI: Run squish ls archive.sqs
-    CLI->>Core: list_squashfs(archive.sqs)
-    Core->>System: Check dependencies (unsquashfs)
-    Core->>System: Validate archive file exists
-    Core->>System: Execute unsquashfs -llc command
-    System-->>Core: Return archive contents
-    Core-->>CLI: Return success/failure
+    CLI->>List: list_squashfs(archive.sqs)
+    List->>Dependencies: Check dependencies (unsquashfs)
+    List->>System: Validate archive file exists
+    List->>System: Execute unsquashfs -llc command
+    System-->>List: Return archive contents
+    List-->>CLI: Return success/failure
     CLI-->>User: Display result
 ```
 
@@ -293,24 +353,59 @@ The entry point, `entry.py`, serves as the main entry point for the application 
 The CLI module, `squish/cli.py`, is responsible for:
 
 - **Command-Line Argument Parsing**: Handling user input with subcommands for mount, unmount, check, build, and list operations.
-- **Operation Orchestration**: Coordination between user commands and core functionality.
+- **Operation Orchestration**: Coordination between user commands and specialized module functionality (mounting, build, checksum, list, dependencies).
 - **Validation**: File and directory existence validation with appropriate error handling.
 - **Global Configuration**: Verbose mode support and configuration management.
 - **Logger Management**: Centralized logger creation and configuration based on command-line arguments.
 - **Error Handling**: Comprehensive error handling with graceful exit codes for all operations.
 
-### Core Module
+### Mounting Module
 
-The core module, `squish/core.py`, contains the main business logic:
+The mounting module, `squish/mounting.py`, handles mount and unmount operations:
 
-- **SquashFSManager**: Main class handling all core operations including dependency checking, mount point validation, and operation execution.
-- **Mount/Unmount Operations**: Comprehensive mounting and unmounting with safety checks, tracking, and automatic cleanup.
-- **Build Operations**: SquashFS archive creation with various compression algorithms, exclusion patterns, and parallel processing.
-- **List Operations**: Archive content listing functionality with detailed output.
-- **Checksum Verification**: File integrity verification using SHA256 checksums with automatic checksum file generation.
-- **Dependency Management**: Automatic checking of required system tools with platform-specific validation.
-- **Mount Tracking**: Robust tracking system to prevent duplicate mounting and ensure proper cleanup.
+- **SquashFSManager**: Main class handling mount and unmount operations including mount point validation and operation execution.
+- **Mount Operations**: Comprehensive mounting with safety checks, directory creation, and mount tracking.
+- **Unmount Operations**: Safe unmounting with validation, cleanup, and tracking removal.
+- **Mount Point Management**: Validation, creation, and determination of mount points.
 - **Security**: Validation of file paths and mount points to prevent path traversal and other security issues.
+
+### Build Module
+
+The build module, `squish/build.py`, manages SquashFS creation:
+
+- **Build Operations**: SquashFS archive creation with various compression algorithms, exclusion patterns, and parallel processing.
+- **Exclude Pattern Processing**: Building exclude arguments from user-specified patterns, files, wildcards, and regex.
+- **Command Execution**: Executing mksquashfs with appropriate options and parameters.
+- **Progress Tracking**: Support for kdialog progress bar during build operations with progress parsing and GUI display.
+- **Dependency Management**: Automatic checking of build dependencies (mksquashfs, unsquashfs, nproc) and optional kdialog dependency.
+- **Validation**: Source directory and output file validation to prevent overwriting.
+- **Checksum Generation**: Automatic generation of SHA256 checksum files for created archives.
+- **Processor Detection**: Automatic detection of processor count for parallel processing or manual override.
+
+### Checksum Module
+
+The checksum module, `squish/checksum.py`, handles integrity verification:
+
+- **Checksum Verification**: File integrity verification using SHA256 checksums with automatic checksum file generation.
+- **File Validation**: Ensuring both target file and checksum file exist in same directory.
+- **Checksum Parsing**: Validating that checksum file contains entry for target filename.
+- **Command Execution**: Executing sha256sum commands for verification and generation.
+
+### List Module
+
+The list module, `squish/list.py`, manages archive content listing:
+
+- **List Operations**: Archive content listing functionality with detailed output using unsquashfs.
+- **Command Execution**: Executing unsquashfs commands to retrieve archive contents.
+- **Archive Validation**: Validating archive files before listing operations.
+
+### Dependencies Module
+
+The dependencies module, `squish/dependencies.py`, handles system tool validation:
+
+- **Dependency Management**: Automatic checking of required system tools with platform-specific validation.
+- **Linux Dependencies**: Verification of Linux-specific tools like squashfuse, fusermount, mksquashfs, unsquashfs.
+- **Build Dependencies**: Validation of build-specific tools like nproc for processor count detection.
 
 ### Desktop Entry
 
@@ -323,7 +418,7 @@ The desktop entry file, `squashfs-actions.desktop`, integrates the utility with 
 
 The configuration module, `squish/config.py`, provides:
 
-- **SquashFSConfig**: Dataclass-based configuration with validation and default values.
+- **SquishFSConfig**: Dataclass-based configuration with validation and default values.
 - **Configurable Parameters**: Mount base directory, temporary directory, auto-cleanup behavior, verbose mode, compression settings, block size, and processor count.
 - **Validation**: Automatic validation of configuration values during initialization.
 - **Flexibility**: Support for different compression algorithms (zstd, gzip, xz, etc.) and configurable block sizes.
@@ -348,6 +443,29 @@ The tracking module, `squish/tracking.py`, provides:
 - **Error Handling**: Graceful handling of tracking file operations and conflicts.
 - **Path Resolution**: Ensures consistent tracking across different file paths that resolve to the same location.
 
+### Core Module
+
+The core module, `squish/core.py`, serves as a facade that coordinates functionality across all specialized modules:
+
+- **SquashFSManager**: Main facade class that initializes and provides access to all specialized managers (MountManager, ChecksumManager, BuildManager, ListManager).
+- **Dependency Checking**: Automatically checks all system dependencies during initialization.
+- **Unified Interface**: Provides a single, cohesive interface for all SquashFS operations.
+- **Configuration Management**: Accepts and uses configuration throughout the system.
+- **Operation Coordination**: Coordinates operations across multiple modules while maintaining separation of concerns.
+
+### Progress Module
+
+The progress module, `squashfs/progress.py`, provides functionality for progress tracking during long-running operations (especially during build operations with kdialog):
+
+- **ProgressHandler**: Abstract interface for progress handling during operations.
+- **KdialogProgressHandler**: GUI progress handler that uses kdialog for progress display in KDE environments.
+- **NoopProgressHandler**: Null object pattern implementation for testing purposes.
+- **CommandRunner**: Interface for command execution that can be mocked for testing.
+- **ProgressParser**: Parses progress information from command output, specifically mksquashfs progress format.
+- **ProgressService**: Coordinates progress handling, command execution, and progress parsing.
+- **Thread Safety**: Uses thread-safe communication for progress updates.
+- **FIFO Communication**: Uses FIFO files for communication between processes in kdialog integration.
+
 ### Error Handling Module
 
 The error handling module, `squish/errors.py`, provides:
@@ -360,14 +478,70 @@ The error handling module, `squish/errors.py`, provides:
 
 ## Test Suite
 
-The test suite is designed to ensure the reliability and correctness of the squish utility. It includes comprehensive testing for all core modules except `entry.py`, which is intentionally not tested as it only serves as an entrypoint for zipapp bundling.
+The test suite is designed to ensure the reliability and correctness of the squish utility. It includes comprehensive testing for all modules (mounting, build, checksum, list, dependencies, cli, config, logging, tracking, errors, progress) except `entry.py`, which is intentionally not tested as it only serves as an entrypoint for zipapp bundling.
+
+### Test Structure
+
+The test suite is organized into separate test files corresponding to each module:
+
+```
+tests/
+├── conftest.py           # Shared fixtures and configuration
+├── FIXTURE_DOCUMENTATION.md  # Comprehensive fixture documentation
+├── test_build.py         # Build functionality tests
+├── test_checksum.py      # Checksum verification tests
+├── test_cli.py           # Command-line interface tests
+├── test_config.py        # Configuration management tests
+├── test_dependencies.py  # Dependency checking tests
+├── test_errors.py        # Custom exception tests
+├── test_list.py          # Archive listing tests
+├── test_logging.py       # Logging functionality tests
+├── test_mounting.py      # Mount/unmount operation tests
+├── test_progress.py      # Progress tracking and UI tests
+└── test_tracking.py      # Mount tracking functionality tests
+```
 
 ### Test Components
 
 1. **Unit Tests**: Testing individual functions and methods to ensure they perform as expected.
 2. **Integration Tests**: Testing the interaction between different components to ensure they work together seamlessly.
 3. **System Tests**: Testing the overall functionality of the utility in a real-world scenario.
-4. **Checksum Tests**: Testing the checksum verification functionality.
+4. **Error Handling Tests**: Comprehensive testing of error conditions and exception handling paths.
+5. **Dependency Injection Tests**: Testing with mocked dependencies to isolate functionality and test edge cases.
+
+### Test Fixture Architecture
+
+The test suite leverages pytest fixtures for efficient and maintainable testing:
+
+- **`test_config`**: Provides a test configuration with isolated temporary directory for each test
+- **`clean_test_environment`**: Automatically cleans up test artifacts using pytest's autouse pattern
+- **Module-specific fixtures**: Each test file may include fixtures specific to the module being tested
+
+### Mocking Strategy
+
+The test suite extensively uses mocking to:
+
+- Isolate functionality from external dependencies (file system, subprocess commands)
+- Test error conditions by simulating command failures
+- Verify specific calls and interactions with external systems
+- Provide controlled test environments without requiring actual system resources
+
+### Test Parametrization
+
+The test suite uses pytest parametrization to efficiently test multiple scenarios:
+
+- **Error conditions**: Testing with various invalid inputs and error scenarios
+- **Configuration variations**: Testing with different configuration values
+- **Input validation**: Testing with various file paths, mount points, and command options
+
+### Test Coverage Strategy
+
+The project maintains high test coverage (90%+), with particular focus on:
+
+- **Core functionality**: Mounting, unmounting, building, checksum verification, and listing operations
+- **Error handling paths**: Command execution failures, validation errors, and edge cases
+- **Configuration scenarios**: Different configuration values and their effects
+- **Security and validation**: Input validation, path traversal prevention, and mount point validation
 
 ### Test Diagram
 
@@ -376,15 +550,27 @@ graph TD
     A[Test Suite] --> B[Unit Tests]
     A --> C[Integration Tests]
     A --> D[System Tests]
-    B --> E[Test Mount Function]
-    B --> F[Test Unmount Function]
-    B --> G[Test Checksum Function]
-    B --> H[Test List Function]
-    C --> I[Test Mount and Unmount Interaction]
-    C --> J[Test Checksum Integration]
-    C --> K[Test Desktop Entry Integration]
-    D --> L[Test Full Mount and Unmount Cycle]
-    D --> M[Test Checksum Verification Cycle]
+    A --> E[Error Handling Tests]
+    A --> F[Dependency Injection Tests]
+    B --> G[Test Build Function]
+    B --> H[Test Mount Function]
+    B --> I[Test Unmount Function]
+    B --> J[Test Checksum Function]
+    B --> K[Test List Function]
+    B --> L[Test CLI Function]
+    B --> M[Test Config Function]
+    C --> N[Test Mount/Unmount Integration]
+    C --> O[Test CLI/Module Integration]
+    C --> P[Test Build/Tracking Integration]
+    D --> Q[Test Full Build Cycle]
+    D --> R[Test Full Mount/Unmount Cycle]
+    D --> S[Test Full Checksum Verification Cycle]
+    E --> T[Test Command Execution Failures]
+    E --> U[Test Validation Failures]
+    E --> V[Test Dependency Missing]
+    F --> W[Test with Mocked Dependencies]
+    F --> X[Test Error Simulations]
+    F --> Y[Test Isolated Functionality]
 ```
 
 ### Test Fixture Documentation

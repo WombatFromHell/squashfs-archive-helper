@@ -4,7 +4,7 @@
 __version__ = "0.1.0"
 
 # Import key components for easy access
-from .config import SquashFSConfig, get_default_config
+from .config import SquishFSConfig, get_default_config
 from .core import SquashFSManager
 from .errors import (
     CommandExecutionError,
@@ -17,10 +17,20 @@ from .errors import (
     UnmountCommandExecutionError,
     UnmountError,
 )
+from .progress import (
+    CommandRunner,
+    DefaultCommandRunner,
+    KdialogProgressHandler,
+    MockCommandRunner,
+    NoopProgressHandler,
+    ProgressHandler,
+    ProgressParser,
+    ProgressService,
+)
 from .tracking import MountTracker
 
 __all__ = [
-    "SquashFSConfig",
+    "SquishFSConfig",
     "get_default_config",
     "SquashFSManager",
     "SquashFSError",
@@ -33,4 +43,12 @@ __all__ = [
     "MountCommandExecutionError",
     "UnmountCommandExecutionError",
     "MountTracker",
+    "KdialogProgressHandler",
+    "NoopProgressHandler",
+    "ProgressHandler",
+    "ProgressParser",
+    "ProgressService",
+    "CommandRunner",
+    "DefaultCommandRunner",
+    "MockCommandRunner",
 ]

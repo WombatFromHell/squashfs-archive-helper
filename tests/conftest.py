@@ -4,14 +4,15 @@ Pytest fixtures and configuration for mount-squashfs tests.
 This file contains shared fixtures and test configuration following pytest best practices.
 """
 
-import os
 import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from squish.config import SquashFSConfig
+from squish.config import SquishFSConfig
+from squish.logging import MountSquashFSLogger
+from squish.tracking import MountTracker
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ def test_config():
     """Create a test configuration with isolated temp directory."""
     # Use a temporary directory instead of /tmp to avoid pollution
     with tempfile.TemporaryDirectory() as temp_dir:
-        config = SquashFSConfig(
+        config = SquishFSConfig(
             mount_base="test_mounts",
             temp_dir=temp_dir,
             auto_cleanup=True,
@@ -31,6 +32,25 @@ def test_config():
             shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception:
             pass
+
+
+@pytest.fixture
+def tracker(test_config):
+    """Create a MountTracker instance for testing with isolated temp dir."""
+    return MountTracker(test_config)
+
+
+@pytest.fixture
+def logger():
+    """Create a logger instance for testing."""
+    return MountSquashFSLogger("test_logger", verbose=False)
+
+
+@pytest.fixture
+def mock_manager(mocker):
+    """Create a mock manager."""
+    manager = mocker.MagicMock()
+    return manager
 
 
 @pytest.fixture(autouse=True)
