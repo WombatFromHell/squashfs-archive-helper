@@ -511,11 +511,52 @@ tests/
 
 ### Test Fixture Architecture
 
-The test suite leverages pytest fixtures for efficient and maintainable testing:
+The test suite leverages a comprehensive pytest fixture system with a builder pattern approach for efficient and maintainable testing. This modernized architecture reduces duplication and improves test data management.
 
-- **`test_config`**: Provides a test configuration with isolated temporary directory for each test
-- **`clean_test_environment`**: Automatically cleans up test artifacts using pytest's autouse pattern
-- **Module-specific fixtures**: Each test file may include fixtures specific to the module being tested
+#### Core Infrastructure Fixtures
+
+These provide fundamental test infrastructure:
+
+- **`test_config`**: Provides a test configuration with isolated temporary directory using pytest's tmp_path
+- **`clean_test_environment`** (autouse): Automatically cleans up test artifacts using pytest's autouse pattern
+- **`tracker`**: Creates a MountTracker instance for testing with isolated temp directory
+- **`logger`**: Creates a MountSquashFSLogger instance for testing
+- **`mock_manager`**: Creates a mocked manager object for testing interactions with mocked dependencies
+
+#### Test Data Builder Fixtures
+
+The test suite now uses a comprehensive test data builder approach:
+
+- **`test_files`**: Creates common test files including squashfs file, checksum file, and source directory (backward compatible)
+- **`build_test_files`**: Creates test files specifically for build tests with nested directories
+- **`checksum_test_files`**: Creates test files specifically for checksum tests
+- **`test_data_builder`**: Provides the test data builder for custom test data creation
+
+#### Builder Pattern Components
+
+The `SquashFSTestDataBuilder` class provides a fluent interface for creating complex test data scenarios:
+
+- **`with_squashfs_file(name, content)`**: Add a squashfs file to the test data
+- **`with_checksum_file(target_file, checksum)`**: Add a checksum file for a target file
+- **`with_source_directory(name, files)`**: Add a source directory with multiple files
+- **`build(base_path)`**: Build the test data in the specified base path
+
+#### Predefined Scenarios
+
+Common test scenarios for quick setup:
+
+- **`default`**: Complete test scenario with squashfs, checksum, and source directory
+- **`build_only`**: Focused on build test requirements with nested directories
+- **`checksum_only`**: Focused on checksum verification tests
+
+#### Module-specific fixtures
+
+Each test file may include fixtures specific to the module being tested:
+
+- **`build_manager`**: Creates a BuildManager instance for testing
+- **`checksum_manager`**: Creates a ChecksumManager instance for testing
+- **`mount_manager`**: Creates a MountManager instance for testing
+- **`list_manager`**: Creates a ListManager instance for testing
 
 ### Mocking Strategy
 

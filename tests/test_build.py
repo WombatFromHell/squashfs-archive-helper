@@ -85,70 +85,64 @@ class TestBuildSquashFS:
         """Create a manager with mocked dependencies."""
         return BuildManager()
 
-    def test_build_squashfs_success(self, mocker, manager):
+    def test_build_squashfs_success(self, mocker, manager, build_test_files):
         """Test successful build operation."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
+        source = build_test_files["source"]
+        output = build_test_files["tmp_path"] / "output.sqsh"
 
-            # Mock subprocess.run
-            mock_run = mocker.patch("squish.build.subprocess.run")
+        # Mock subprocess.run
+        mock_run = mocker.patch("squish.build.subprocess.run")
 
-            # Mock subprocess.run to return appropriate values
-            def mock_run_side_effect(cmd, **kwargs):
-                if cmd[0] == "nproc":
-                    return mocker.MagicMock(
-                        stdout="4\n", returncode=0, check=lambda: True
-                    )
-                elif cmd[0] == "mksquashfs":
-                    return mocker.MagicMock(returncode=0, check=lambda: True)
-                elif cmd[0] == "sha256sum":
-                    # Return a mock with proper stdout for checksum
-                    mock_result = mocker.MagicMock()
-                    mock_result.stdout = f"d41d8cd98f00b204e9800998ecf8427e  {output}\n"
-                    mock_result.returncode = 0
-                    mock_result.check = lambda: True
-                    return mock_result
+        # Mock subprocess.run to return appropriate values
+        def mock_run_side_effect(cmd, **kwargs):
+            if cmd[0] == "nproc":
+                return mocker.MagicMock(stdout="4\n", returncode=0, check=lambda: True)
+            elif cmd[0] == "mksquashfs":
                 return mocker.MagicMock(returncode=0, check=lambda: True)
+            elif cmd[0] == "sha256sum":
+                # Return a mock with proper stdout for checksum
+                mock_result = mocker.MagicMock()
+                mock_result.stdout = f"d41d8cd98f00b204e9800998ecf8427e  {output}\n"
+                mock_result.returncode = 0
+                mock_result.check = lambda: True
+                return mock_result
+            return mocker.MagicMock(returncode=0, check=lambda: True)
 
-            mock_run.side_effect = mock_run_side_effect
+        mock_run.side_effect = mock_run_side_effect
 
-            manager.build_squashfs(str(source), str(output))
+        manager.build_squashfs(str(source), str(output))
 
-            # Verify mksquashfs was called
-            assert mock_run.call_count >= 3  # nproc + mksquashfs + sha256sum
+        # Verify mksquashfs was called
+        assert mock_run.call_count >= 3  # nproc + mksquashfs + sha256sum
 
-            # Verify checksum was generated
-            checksum_file = str(output) + ".sha256"
-            assert Path(checksum_file).exists()
+        # Verify checksum was generated
+        checksum_file = str(output) + ".sha256"
+        assert Path(checksum_file).exists()
 
-            # Verify checksum content
-            with open(checksum_file, "r") as f:
-                content = f.read()
-            assert f"d41d8cd98f00b204e9800998ecf8427e  {output}" in content
+        # Verify checksum content
+        with open(checksum_file, "r") as f:
+            content = f.read()
+        assert f"d41d8cd98f00b204e9800998ecf8427e  {output}" in content
 
     def test_build_squashfs_source_not_found(self, manager):
         """Test build operation with non-existent source."""
         with pytest.raises(BuildError, match="Source not found"):
             manager.build_squashfs("/nonexistent/source", "/output.sqsh")
 
-    def test_build_squashfs_output_exists(self, manager):
+    def test_build_squashfs_output_exists(self, manager, build_test_files):
         """Test build operation with existing output."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
-            output.touch()  # Create existing file
+        source = build_test_files["source"]
+        output = build_test_files["tmp_path"] / "output.sqsh"
+        output.touch()  # Create existing file
 
-            with pytest.raises(BuildError, match="Output exists"):
-                manager.build_squashfs(str(source), str(output))
+        with pytest.raises(BuildError, match="Output exists"):
+            manager.build_squashfs(str(source), str(output))
 
 
 class TestBuildCommandExecution:
     """Test build command execution errors."""
 
-    def test_mksquashfs_command_execution_error(self, mocker):
+    def test_mksquashfs_command_execution_error(self, mocker, build_test_files):
         """Test MksquashfsCommandExecutionError."""
         config = SquishFSConfig()
         manager = BuildManager(config)
@@ -157,22 +151,22 @@ class TestBuildCommandExecution:
         mock_run = mocker.patch("squish.build.subprocess.run")
         mock_run.side_effect = CalledProcessError(1, "mksquashfs", "Test error")
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
+        source = build_test_files["source"]
+        output = build_test_files["tmp_path"] / "output.sqsh"
 
-            with pytest.raises(MksquashfsCommandExecutionError) as exc_info:
-                manager._execute_mksquashfs_command(
-                    str(source), str(output), [], "zstd", "1M", 1
-                )
+        with pytest.raises(MksquashfsCommandExecutionError) as exc_info:
+            manager._execute_mksquashfs_command(
+                str(source), str(output), [], "zstd", "1M", 1
+            )
 
-            assert exc_info.value.command == "mksquashfs"
-            assert exc_info.value.return_code == 1
-            assert "Failed to create archive" in exc_info.value.message
-            assert isinstance(exc_info.value, BuildError)
+        assert exc_info.value.command == "mksquashfs"
+        assert exc_info.value.return_code == 1
+        assert "Failed to create archive" in exc_info.value.message
+        assert isinstance(exc_info.value, BuildError)
 
-    def test_execute_mksquashfs_command_with_kdialog_success(self, mocker):
+    def test_execute_mksquashfs_command_with_kdialog_success(
+        self, mocker, build_test_files
+    ):
         """Test executing mksquashfs command with kdialog enabled and success."""
         config = SquishFSConfig()
         manager = BuildManager(config)
@@ -185,29 +179,27 @@ class TestBuildCommandExecution:
         mock_progress_service = mocker.MagicMock()
         mock_progress_service.run_mksquashfs_with_progress = mocker.MagicMock()
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
+        source = build_test_files["source"]
+        output = build_test_files["tmp_path"] / "output.sqsh"
 
-            # This should not raise an exception
-            manager._execute_mksquashfs_command(
-                str(source),
-                str(output),
-                [],
-                "zstd",
-                "1M",
-                1,
-                kdialog=True,
-                progress_service=mock_progress_service,
-            )
+        # This should not raise an exception
+        manager._execute_mksquashfs_command(
+            str(source),
+            str(output),
+            [],
+            "zstd",
+            "1M",
+            1,
+            kdialog=True,
+            progress_service=mock_progress_service,
+        )
 
-            # Since kdialog is True, it should call _run_mksquashfs_with_progress_service instead of subprocess.run
-            # Verify that the command was called with progress flag by checking internal command construction
-            # In the method, when kdialog=True, the -progress flag should be added
-            # So we need to check that the internal method was called with the right parameters
-            # Check that run_mksquashfs_with_progress was called with command including -progress
-            assert mock_progress_service.run_mksquashfs_with_progress.called
+        # Since kdialog is True, it should call _run_mksquashfs_with_progress_service instead of subprocess.run
+        # Verify that the command was called with progress flag by checking internal command construction
+        # In the method, when kdialog=True, the -progress flag should be added
+        # So we need to check that the internal method was called with the right parameters
+        # Check that run_mksquashfs_with_progress was called with command including -progress
+        assert mock_progress_service.run_mksquashfs_with_progress.called
 
 
 class TestBuildDependencyChecking:
@@ -239,7 +231,9 @@ class TestBuildDependencyChecking:
         with pytest.raises(DependencyError, match="is not installed or not in PATH"):
             manager._check_build_dependencies()
 
-    def test_build_squashfs_kdialog_dependency_check_failure(self, mocker):
+    def test_build_squashfs_kdialog_dependency_check_failure(
+        self, mocker, build_test_files
+    ):
         """Test kdialog dependency check failure during build."""
         from squish.errors import DependencyError
 
@@ -256,15 +250,13 @@ class TestBuildDependencyChecking:
         mock_run = mocker.patch("subprocess.run")
         mock_run.side_effect = mock_run_side_effect
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
+        source = build_test_files["source"]
+        output = build_test_files["tmp_path"] / "output.sqsh"
 
-            with pytest.raises(DependencyError, match="kdialog is not installed"):
-                manager.build_squashfs(str(source), str(output), kdialog=True)
+        with pytest.raises(DependencyError, match="kdialog is not installed"):
+            manager.build_squashfs(str(source), str(output), kdialog=True)
 
-    def test_build_squashfs_nproc_fallback(self, mocker):
+    def test_build_squashfs_nproc_fallback(self, mocker, build_test_files):
         """Test nproc command failure with fallback to 1 processor."""
         config = SquishFSConfig()
         manager = BuildManager(config)
@@ -286,13 +278,11 @@ class TestBuildDependencyChecking:
 
         mock_run.side_effect = run_side_effect
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
+        source = build_test_files["source"]
+        output = build_test_files["tmp_path"] / "output.sqsh"
 
-            # This should not raise an exception and should use 1 processor as fallback
-            manager.build_squashfs(str(source), str(output))
+        # This should not raise an exception and should use 1 processor as fallback
+        manager.build_squashfs(str(source), str(output))
 
     def test_build_squashfs_with_progress_service_subprocess_error(self, mocker):
         """Test progress service with SubprocessError during archive creation."""

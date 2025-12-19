@@ -5,33 +5,151 @@ This file contains shared fixtures and test configuration following pytest best 
 """
 
 import shutil
-import tempfile
 from pathlib import Path
+from typing import Any, Dict, Union
 
 import pytest
 
+from squish.build import BuildManager
+from squish.checksum import ChecksumManager
 from squish.config import SquishFSConfig
+from squish.list import ListManager
 from squish.logging import MountSquashFSLogger
+from squish.mounting import MountManager
 from squish.tracking import MountTracker
 
 
-@pytest.fixture
-def test_config():
-    """Create a test configuration with isolated temp directory."""
-    # Use a temporary directory instead of /tmp to avoid pollution
-    with tempfile.TemporaryDirectory() as temp_dir:
-        config = SquishFSConfig(
-            mount_base="test_mounts",
-            temp_dir=temp_dir,
-            auto_cleanup=True,
-            verbose=False,
+class SquashFSTestDataBuilder:
+    """Builder for creating complex test data scenarios."""
+
+    def __init__(self):
+        self._data = {}
+
+    def with_squashfs_file(
+        self, name: str = "test.sqsh", content: str = "test content"
+    ) -> "SquashFSTestDataBuilder":
+        """Add a squashfs file to the test data."""
+        self._data[name] = {"type": "squashfs", "content": content}
+        return self
+
+    def with_checksum_file(
+        self,
+        target_file: str,
+        checksum: str = "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3",
+    ) -> "SquashFSTestDataBuilder":
+        """Add a checksum file for a target file."""
+        checksum_name = f"{target_file}.sha256"
+        self._data[checksum_name] = {
+            "type": "checksum",
+            "content": f"{checksum}  {target_file}",
+        }
+        return self
+
+    def with_source_directory(
+        self,
+        name: str = "source",
+        files: Union[
+            Dict[str, str], Dict[str, Union[str, Dict[str, str]]], None
+        ] = None,
+    ) -> "SquashFSTestDataBuilder":
+        """Add a source directory with files."""
+        if files is None:
+            files = {"file1.txt": "content1", "file2.txt": "content2"}
+
+        self._data[name] = {"type": "directory", "files": files}
+        return self
+
+    def build(self, base_path: Path) -> Dict[str, Any]:
+        """Build the test data in the specified base path."""
+        created_files = {}
+
+        for name, data in self._data.items():
+            if data["type"] == "squashfs":
+                file_path = base_path / name
+                file_path.write_text(data["content"])
+                created_files[name] = file_path
+            elif data["type"] == "checksum":
+                file_path = base_path / name
+                file_path.write_text(data["content"])
+                created_files[name] = file_path
+            elif data["type"] == "directory":
+                dir_path = base_path / name
+                dir_path.mkdir()
+                created_files[name] = dir_path
+
+                for file_name, file_content in data["files"].items():
+                    if isinstance(file_content, dict):
+                        # Handle nested directories
+                        nested_dir = dir_path / file_name
+                        nested_dir.mkdir()
+                        created_files[f"{name}/{file_name}"] = nested_dir
+                        for nested_file, nested_content in file_content.items():
+                            nested_file_path = nested_dir / nested_file
+                            nested_file_path.write_text(nested_content)
+                            created_files[f"{name}/{file_name}/{nested_file}"] = (
+                                nested_file_path
+                            )
+                    else:
+                        # Handle regular files
+                        file_path = dir_path / file_name
+                        file_path.write_text(file_content)
+                        created_files[f"{name}/{file_name}"] = file_path
+
+        return created_files
+
+
+def create_test_scenario(
+    tmp_path: Path, scenario_name: str = "default"
+) -> Dict[str, Any]:
+    """Create a complete test scenario with common test data.
+
+    Args:
+        tmp_path: pytest's tmp_path fixture
+        scenario_name: Name of the scenario to create
+
+    Returns:
+        Dictionary containing paths to created test files and directories
+    """
+    builder = SquashFSTestDataBuilder()
+
+    if scenario_name == "default":
+        return (
+            builder.with_squashfs_file()
+            .with_checksum_file("test.sqsh")
+            .with_source_directory()
+            .build(tmp_path)
         )
-        yield config
-        # Clean up any remaining files in the temp directory
-        try:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception:
-            pass
+
+    elif scenario_name == "build_only":
+        return builder.with_source_directory(
+            files={
+                "file1.txt": "build content 1",
+                "file2.txt": "build content 2",
+                "subdir": {"nested.txt": "nested content"},
+            }
+        ).build(tmp_path)
+
+    elif scenario_name == "checksum_only":
+        return (
+            builder.with_squashfs_file("archive.sqsh", "archive content")
+            .with_checksum_file("archive.sqsh", "custom_checksum_value")
+            .build(tmp_path)
+        )
+
+    else:
+        raise ValueError(f"Unknown scenario: {scenario_name}")
+
+
+@pytest.fixture
+def test_config(tmp_path):
+    """Create a test configuration with isolated temp directory using pytest's tmp_path."""
+    config = SquishFSConfig(
+        mount_base="test_mounts",
+        temp_dir=str(tmp_path),
+        auto_cleanup=True,
+        verbose=False,
+    )
+    return config
 
 
 @pytest.fixture
@@ -51,6 +169,82 @@ def mock_manager(mocker):
     """Create a mock manager."""
     manager = mocker.MagicMock()
     return manager
+
+
+@pytest.fixture
+def build_manager(test_config):
+    """Create a BuildManager instance for testing."""
+    return BuildManager(test_config)
+
+
+@pytest.fixture
+def checksum_manager(test_config):
+    """Create a ChecksumManager instance for testing."""
+    return ChecksumManager(test_config)
+
+
+@pytest.fixture
+def mount_manager(test_config):
+    """Create a MountManager instance for testing."""
+    return MountManager(test_config)
+
+
+@pytest.fixture
+def list_manager(test_config):
+    """Create a ListManager instance for testing."""
+    return ListManager(test_config)
+
+
+@pytest.fixture
+def test_files(tmp_path):
+    """Create common test files for reuse across tests using the test data builder."""
+    # Use the builder to create test files consistently
+    test_files = create_test_scenario(tmp_path, "default")
+
+    # Map to maintain backward compatibility with existing tests
+    return {
+        "test_file": test_files["test.sqsh"],
+        "checksum_file": test_files["test.sqsh.sha256"],
+        "source_dir": test_files["source"],
+        "tmp_path": tmp_path,
+    }
+
+
+@pytest.fixture
+def build_test_files(tmp_path):
+    """Create test files specifically for build tests with nested directories."""
+    test_files = create_test_scenario(tmp_path, "build_only")
+    # Include tmp_path for convenience
+    test_files["tmp_path"] = tmp_path
+    return test_files
+
+
+@pytest.fixture
+def checksum_test_files(tmp_path):
+    """Create test files specifically for checksum tests."""
+    test_files = create_test_scenario(tmp_path, "checksum_only")
+    # Include tmp_path for convenience
+    test_files["tmp_path"] = tmp_path
+    return test_files
+
+
+@pytest.fixture
+def test_data_builder():
+    """Provide the test data builder for custom test data creation."""
+    return SquashFSTestDataBuilder()
+
+
+def create_mock_command_data() -> Dict[str, Any]:
+    """Create mock data for command execution tests."""
+    return {
+        "nproc": {"stdout": "4\n", "returncode": 0, "check": lambda: True},
+        "mksquashfs": {"returncode": 0, "check": lambda: True},
+        "sha256sum": {
+            "stdout": "d41d8cd98f00b204e9800998ecf8427e  output.sqsh\n",
+            "returncode": 0,
+            "check": lambda: True,
+        },
+    }
 
 
 @pytest.fixture(autouse=True)
