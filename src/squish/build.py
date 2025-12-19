@@ -16,12 +16,7 @@ from .errors import (
     MksquashfsCommandExecutionError,
 )
 from .logging import get_logger
-from .progress import (
-    DefaultCommandRunner,
-    KdialogProgressHandler,
-    ProgressParser,
-    ProgressService,
-)
+
 
 
 class BuildManager:
@@ -68,7 +63,6 @@ class BuildManager:
         compression: str,
         block_size: str,
         processors: int,
-        kdialog: bool = False,
         progress_service=None,  # For dependency injection in tests
     ) -> None:
         """Execute mksquashfs command to create archive."""
@@ -84,59 +78,23 @@ class BuildManager:
             str(processors),
         ] + excludes
 
-        # Add progress flag when kdialog is enabled to capture progress output
-        if kdialog:
-            command.append("-progress")
-
         if self.config.verbose:
             self.logger.log_command_execution(" ".join(command))
 
-        if kdialog:
-            # Run mksquashfs with progress tracking via kdialog
-            # Use progress service for kdialog progress tracking
-            self._run_mksquashfs_with_progress_service(command, progress_service)
-        else:
-            # Run mksquashfs normally
-            try:
-                subprocess.run(command, check=True)
-                if self.config.verbose:
-                    self.logger.log_command_execution(" ".join(command), success=True)
-            except subprocess.CalledProcessError as e:
-                self.logger.log_command_execution(
-                    " ".join(command), e.returncode, success=False
-                )
-                raise MksquashfsCommandExecutionError(
-                    "mksquashfs", e.returncode, f"Failed to create archive: {e.stderr}"
-                )
-
-    def _run_mksquashfs_with_progress_service(
-        self, command: list[str], progress_service=None
-    ) -> None:
-        """Run mksquashfs command with progress tracking using the progress service."""
-        # Use provided progress service or create default one for normal operation
-        if progress_service is None:
-            progress_handler = KdialogProgressHandler()
-            command_runner = DefaultCommandRunner()
-            progress_parser = ProgressParser()
-
-            progress_service = ProgressService(
-                progress_handler=progress_handler,
-                command_runner=command_runner,
-                progress_parser=progress_parser,
-            )
-
+        # Run mksquashfs normally
         try:
-            progress_service.run_mksquashfs_with_progress(command)
+            subprocess.run(command, check=True)
+            if self.config.verbose:
+                self.logger.log_command_execution(" ".join(command), success=True)
         except subprocess.CalledProcessError as e:
-            raise MksquashfsCommandExecutionError(
-                "mksquashfs",
-                e.returncode,
-                f"Failed to create archive: {e.stderr or str(e)}",
+            self.logger.log_command_execution(
+                " ".join(command), e.returncode, success=False
             )
-        except subprocess.SubprocessError as e:
             raise MksquashfsCommandExecutionError(
-                "mksquashfs", -1, f"Error during archive creation: {str(e)}"
+                "mksquashfs", e.returncode, f"Failed to create archive: {e.stderr}"
             )
+
+
 
     def build_squashfs(
         self,
@@ -149,7 +107,6 @@ class BuildManager:
         compression: str = "zstd",
         block_size: str = "1M",
         processors: int | None = None,
-        kdialog: bool = False,
         progress_service=None,  # For dependency injection in tests
     ) -> None:
         """Build a SquashFS archive with optional excludes."""
@@ -169,23 +126,7 @@ class BuildManager:
         # Check build dependencies
         self._check_build_dependencies()
 
-        # If kdialog is requested, also check kdialog dependency
-        if kdialog:
-            try:
-                subprocess.run(
-                    ["which", "kdialog"],
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-                if self.config.verbose:
-                    self.logger.log_dependency_check("kdialog", "available")
-            except subprocess.CalledProcessError:
-                self.logger.log_dependency_check("kdialog", "missing")
-                raise DependencyError(
-                    "kdialog is not installed or not in PATH. "
-                    "Please install kdialog to use the kdialog feature."
-                )
+
 
         # Determine processors if not specified
         if processors is None:
@@ -210,7 +151,6 @@ class BuildManager:
             compression,
             block_size,
             processors,
-            kdialog,
             progress_service,
         )
 

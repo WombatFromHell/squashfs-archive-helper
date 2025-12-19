@@ -164,42 +164,7 @@ class TestBuildCommandExecution:
         assert "Failed to create archive" in exc_info.value.message
         assert isinstance(exc_info.value, BuildError)
 
-    def test_execute_mksquashfs_command_with_kdialog_success(
-        self, mocker, build_test_files
-    ):
-        """Test executing mksquashfs command with kdialog enabled and success."""
-        config = SquishFSConfig()
-        manager = BuildManager(config)
 
-        # Mock the subprocess run inside _run_mksquashfs_with_progress_service
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = mocker.MagicMock(returncode=0)
-
-        # Mock the progress service to avoid actual kdialog execution
-        mock_progress_service = mocker.MagicMock()
-        mock_progress_service.run_mksquashfs_with_progress = mocker.MagicMock()
-
-        source = build_test_files["source"]
-        output = build_test_files["tmp_path"] / "output.sqsh"
-
-        # This should not raise an exception
-        manager._execute_mksquashfs_command(
-            str(source),
-            str(output),
-            [],
-            "zstd",
-            "1M",
-            1,
-            kdialog=True,
-            progress_service=mock_progress_service,
-        )
-
-        # Since kdialog is True, it should call _run_mksquashfs_with_progress_service instead of subprocess.run
-        # Verify that the command was called with progress flag by checking internal command construction
-        # In the method, when kdialog=True, the -progress flag should be added
-        # So we need to check that the internal method was called with the right parameters
-        # Check that run_mksquashfs_with_progress was called with command including -progress
-        assert mock_progress_service.run_mksquashfs_with_progress.called
 
 
 class TestBuildDependencyChecking:
@@ -231,30 +196,7 @@ class TestBuildDependencyChecking:
         with pytest.raises(DependencyError, match="is not installed or not in PATH"):
             manager._check_build_dependencies()
 
-    def test_build_squashfs_kdialog_dependency_check_failure(
-        self, mocker, build_test_files
-    ):
-        """Test kdialog dependency check failure during build."""
-        from squish.errors import DependencyError
 
-        config = SquishFSConfig()
-        manager = BuildManager(config)
-
-        # Mock successful build deps check but failed kdialog check
-        def mock_run_side_effect(cmd, **kwargs):
-            if cmd == ["which", "kdialog"]:
-                raise CalledProcessError(1, "which")
-            else:
-                return mocker.MagicMock()
-
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.side_effect = mock_run_side_effect
-
-        source = build_test_files["source"]
-        output = build_test_files["tmp_path"] / "output.sqsh"
-
-        with pytest.raises(DependencyError, match="kdialog is not installed"):
-            manager.build_squashfs(str(source), str(output), kdialog=True)
 
     def test_build_squashfs_nproc_fallback(self, mocker, build_test_files):
         """Test nproc command failure with fallback to 1 processor."""
@@ -284,89 +226,7 @@ class TestBuildDependencyChecking:
         # This should not raise an exception and should use 1 processor as fallback
         manager.build_squashfs(str(source), str(output))
 
-    def test_build_squashfs_with_progress_service_subprocess_error(self, mocker):
-        """Test progress service with SubprocessError during archive creation."""
-        import subprocess
 
-        from squish.errors import MksquashfsCommandExecutionError
-
-        config = SquishFSConfig()
-        manager = BuildManager(config)
-
-        # Mock successful dependencies and source validation
-        mock_run = mocker.patch("subprocess.run")
-
-        def run_side_effect(cmd, **kwargs):
-            if cmd[0] in ["mksquashfs", "nproc"]:
-                return mocker.MagicMock()
-            elif "sha256sum" in cmd[0]:
-                result = mocker.MagicMock()
-                result.stdout = "dummy_checksum  /path/to/file\n"
-                return result
-            else:
-                return mocker.MagicMock()
-
-        mock_run.side_effect = run_side_effect
-
-        # Mock progress service to raise SubprocessError to trigger the exception handling
-        mock_progress_service = mocker.MagicMock()
-        mock_progress_service.run_mksquashfs_with_progress.side_effect = (
-            subprocess.SubprocessError("Test subprocess error")
-        )
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
-
-            with pytest.raises(MksquashfsCommandExecutionError) as exc_info:
-                manager._run_mksquashfs_with_progress_service(
-                    ["mksquashfs", str(source), str(output)], mock_progress_service
-                )
-
-            assert "Error during archive creation" in exc_info.value.message
-
-    def test_build_squashfs_with_progress_service_called_process_error(self, mocker):
-        """Test progress service with CalledProcessError during archive creation."""
-        from squish.errors import MksquashfsCommandExecutionError
-
-        config = SquishFSConfig()
-        manager = BuildManager(config)
-
-        # Mock successful dependencies and source validation
-        mock_run = mocker.patch("subprocess.run")
-
-        def run_side_effect(cmd, **kwargs):
-            if cmd[0] in ["mksquashfs", "nproc"]:
-                return mocker.MagicMock()
-            elif "sha256sum" in cmd[0]:
-                result = mocker.MagicMock()
-                result.stdout = "dummy_checksum  /path/to/file\n"
-                return result
-            else:
-                return mocker.MagicMock()
-
-        mock_run.side_effect = run_side_effect
-
-        # Mock progress service to raise CalledProcessError
-        from subprocess import CalledProcessError
-
-        mock_progress_service = mocker.MagicMock()
-        mock_progress_service.run_mksquashfs_with_progress.side_effect = (
-            CalledProcessError(1, "mksquashfs", "Test error")
-        )
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
-
-            with pytest.raises(MksquashfsCommandExecutionError) as exc_info:
-                manager._run_mksquashfs_with_progress_service(
-                    ["mksquashfs", str(source), str(output)], mock_progress_service
-                )
-
-            assert "Failed to create archive" in exc_info.value.message
 
     def test_generate_checksum_command_execution_error(self, mocker):
         """Test checksum generation command execution failure."""
@@ -394,54 +254,7 @@ class TestBuildDependencyChecking:
 class TestBuildCoverageGaps:
     """Test coverage gap scenarios for build functionality."""
 
-    def test_run_mksquashfs_with_progress_service_defaults(self, mocker):
-        """Test _run_mksquashfs_with_progress_service with default progress service."""
-        config = SquishFSConfig()
-        manager = BuildManager(config)
 
-        # Mock the progress service components to avoid actual kdialog execution
-        mock_progress_handler = mocker.MagicMock()
-        mock_command_runner = mocker.MagicMock()
-        mock_progress_parser = mocker.MagicMock()
-
-        mock_progress_service_cls = mocker.patch("squish.build.ProgressService")
-        mock_progress_service_instance = mocker.MagicMock()
-        mock_progress_service_cls.return_value = mock_progress_service_instance
-
-        # Mock the subprocess operations
-        def mock_run_side_effect(cmd, **kwargs):
-            if cmd[0] == "mksquashfs":
-                result = mocker.MagicMock()
-                result.returncode = 0
-                return result
-            else:
-                return mocker.MagicMock()
-
-        mock_popen = mocker.patch("subprocess.Popen")
-        mock_proc = mocker.MagicMock()
-        mock_proc.stderr = mocker.MagicMock()
-        mock_proc.stderr.readline.return_value = ""
-        mock_proc.stderr.__iter__.return_value = iter([""])
-        mock_proc.wait.return_value = 0
-        mock_popen.return_value = mock_proc
-
-        # Mock imports for the progress service
-        mocker.patch(
-            "squish.build.KdialogProgressHandler", return_value=mock_progress_handler
-        )
-        mocker.patch(
-            "squish.build.DefaultCommandRunner", return_value=mock_command_runner
-        )
-        mocker.patch("squish.build.ProgressParser", return_value=mock_progress_parser)
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
-
-            # This should not raise an exception when called with default progress service
-            command = ["mksquashfs", str(source), str(output)]
-            manager._run_mksquashfs_with_progress_service(command)
 
     def test_generate_checksum_success(self, mocker):
         """Test successful checksum generation."""
@@ -489,35 +302,7 @@ class TestBuildCoverageGaps:
         assert "unsquashfs" in commands_checked
         assert "nproc" in commands_checked
 
-    def test_build_squashfs_with_kdialog_dependency_missing(self, mocker):
-        """Test kdialog dependency check failure during build with kdialog=True."""
-        from squish.errors import DependencyError
 
-        config = SquishFSConfig()
-        manager = BuildManager(config)
-
-        # Mock subprocess runs
-        def mock_run_side_effect(cmd, **kwargs):
-            if cmd == ["which", "kdialog"]:
-                # Simulate kdialog not being found
-                raise CalledProcessError(1, "which")
-            elif cmd[0] in ["nproc", "mksquashfs", "sha256sum"]:
-                result = mocker.MagicMock()
-                if cmd[0] == "nproc":
-                    result.stdout = "4\n"
-                return result
-            return mocker.MagicMock()
-
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.side_effect = mock_run_side_effect
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
-
-            with pytest.raises(DependencyError, match="kdialog is not installed"):
-                manager.build_squashfs(str(source), str(output), kdialog=True)
 
     def test_build_squashfs_processors_fallback(self, mocker):
         """Test processors fallback to 1 when nproc command fails."""
@@ -573,111 +358,8 @@ class TestBuildCoverageGaps:
         with pytest.raises(DependencyError, match="mksquashfs is not installed"):
             manager._check_build_dependencies()
 
-    def test_execute_mksquashfs_with_kdialog_progress(self, mocker):
-        """Test _execute_mksquashfs_command with kdialog enabled."""
-        config = SquishFSConfig()
-        manager = BuildManager(config)
 
-        # Mock successful dependencies and source validation
-        mock_run = mocker.patch("subprocess.run")
 
-        def run_side_effect(cmd, **kwargs):
-            if cmd[0] in ["mksquashfs", "nproc"]:
-                return mocker.MagicMock()
-            elif "sha256sum" in cmd[0]:
-                result = mocker.MagicMock()
-                result.stdout = "dummy_checksum  /path/to/file\n"
-                return result
-            else:
-                return mocker.MagicMock()
 
-        mock_run.side_effect = run_side_effect
 
-        # Mock the progress service to avoid actual kdialog execution
-        mock_progress_service = mocker.MagicMock()
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
-
-            # This should call _run_mksquashfs_with_progress_service due to kdialog=True
-            manager._execute_mksquashfs_command(
-                str(source),
-                str(output),
-                [],
-                "zstd",
-                "1M",
-                1,
-                kdialog=True,
-                progress_service=mock_progress_service,
-            )
-
-            # Verify that _run_mksquashfs_with_progress_service was called
-            mock_progress_service.run_mksquashfs_with_progress.assert_called_once()
-
-    def test_execute_mksquashfs_without_kdialog_success(self, mocker):
-        """Test _execute_mksquashfs_command without kdialog (normal execution path)."""
-        config = SquishFSConfig()
-        manager = BuildManager(config)
-
-        # Mock successful subprocess.run
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = mocker.MagicMock()
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
-
-            # This should execute the normal path without kdialog
-            manager._execute_mksquashfs_command(
-                str(source), str(output), [], "zstd", "1M", 1, kdialog=False
-            )
-
-            # Verify subprocess.run was called
-            mock_run.assert_called_once()
-
-    def test_execute_mksquashfs_without_kdialog_failure(self, mocker):
-        """Test _execute_mksquashfs_command without kdialog when subprocess fails."""
-        from squish.errors import MksquashfsCommandExecutionError
-
-        config = SquishFSConfig()
-        manager = BuildManager(config)
-
-        # Mock subprocess.run to fail
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.side_effect = CalledProcessError(1, "mksquashfs", "Test error")
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir) / "source"
-            source.mkdir()
-            output = Path(temp_dir) / "output.sqsh"
-
-            with pytest.raises(MksquashfsCommandExecutionError):
-                manager._execute_mksquashfs_command(
-                    str(source), str(output), [], "zstd", "1M", 1, kdialog=False
-                )
-
-    def test_run_mksquashfs_with_progress_service_with_provided_service(self, mocker):
-        """Test _run_mksquashfs_with_progress_service when progress_service is provided."""
-        config = SquishFSConfig()
-        manager = BuildManager(config)
-
-        # Mock successful dependencies
-        mocker.patch("subprocess.run", return_value=mocker.MagicMock())
-
-        # Mock progress service
-        provided_progress_service = mocker.MagicMock()
-
-        command = ["mksquashfs", "/source", "/output"]
-
-        # This should use the provided progress service instead of creating a new one
-        manager._run_mksquashfs_with_progress_service(
-            command, provided_progress_service
-        )
-
-        # Verify that the provided service was used
-        provided_progress_service.run_mksquashfs_with_progress.assert_called_once_with(
-            command
-        )

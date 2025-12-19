@@ -76,9 +76,6 @@ def parse_args() -> argparse.Namespace:
     build_parser.add_argument(
         "-p", "--processors", type=int, help="Number of processors (default: auto)"
     )
-    build_parser.add_argument(
-        "--kdialog", action="store_true", help="Show kdialog progress bar during build"
-    )
 
     # List command
     list_parser = subparsers.add_parser(
@@ -187,7 +184,6 @@ def handle_build_operation(
     compression: str = "zstd",
     block_size: str = "1M",
     processors: int | None = None,
-    kdialog: bool = False,
     logger=None,
 ) -> None:
     """Handle the build operation."""
@@ -202,7 +198,6 @@ def handle_build_operation(
             compression=compression,
             block_size=block_size,
             processors=processors,
-            kdialog=kdialog,
         )
     except BuildError as e:
         if logger:
@@ -265,7 +260,6 @@ def main() -> None:
                 compression=args.compression,
                 block_size=args.block_size,
                 processors=args.processors,
-                kdialog=args.kdialog,
                 logger=logger,
             )
 
