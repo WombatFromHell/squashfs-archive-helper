@@ -90,6 +90,12 @@ class ListError(SquashFSError):
     pass
 
 
+class ExtractError(SquashFSError):
+    """Exception raised when extract operations fail."""
+
+    pass
+
+
 class MksquashfsCommandExecutionError(CommandExecutionError, BuildError):
     """Exception raised when mksquashfs command execution fails."""
 
@@ -98,5 +104,11 @@ class MksquashfsCommandExecutionError(CommandExecutionError, BuildError):
 
 class UnsquashfsCommandExecutionError(CommandExecutionError, ListError):
     """Exception raised when unsquashfs command execution fails."""
+
+    pass
+
+
+class UnsquashfsExtractCommandExecutionError(CommandExecutionError, ExtractError):
+    """Exception raised when unsquashfs extract command execution fails."""
 
     pass

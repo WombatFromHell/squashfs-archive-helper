@@ -29,6 +29,15 @@ class TestArgumentParsing:
         assert args.mount_point is None
         assert args.verbose is False
 
+    def test_parse_mount_abbreviated_args(self, mocker):
+        """Test parsing abbreviated mount command arguments."""
+        mocker.patch("sys.argv", ["squish", "m", "test.sqs"])
+        args = parse_args()
+        assert args.command == "m"
+        assert args.file == "test.sqs"
+        assert args.mount_point is None
+        assert args.verbose is False
+
     def test_parse_mount_with_mount_point(self, mocker):
         """Test parsing mount command with mount point."""
         mocker.patch("sys.argv", ["squish", "mount", "test.sqs", "/mnt/point"])
@@ -42,6 +51,14 @@ class TestArgumentParsing:
         mocker.patch("sys.argv", ["squish", "unmount", "test.sqs"])
         args = parse_args()
         assert args.command == "unmount"
+        assert args.file == "test.sqs"
+        assert args.mount_point is None
+
+    def test_parse_unmount_abbreviated_args(self, mocker):
+        """Test parsing abbreviated unmount command arguments."""
+        mocker.patch("sys.argv", ["squish", "um", "test.sqs"])
+        args = parse_args()
+        assert args.command == "um"
         assert args.file == "test.sqs"
         assert args.mount_point is None
 
@@ -103,6 +120,36 @@ class TestArgumentParsing:
         args = parse_args()
         assert args.command == "ls"
         assert args.archive == "archive.sqsh"
+
+    def test_parse_list_abbreviated_args(self, mocker):
+        """Test parsing abbreviated list command arguments."""
+        mocker.patch("sys.argv", ["squish", "l", "archive.sqsh"])
+        args = parse_args()
+        assert args.command == "l"
+        assert args.archive == "archive.sqsh"
+
+    def test_parse_extract_abbreviated_args(self, mocker):
+        """Test parsing abbreviated extract command arguments."""
+        mocker.patch("sys.argv", ["squish", "ex", "archive.sqsh"])
+        args = parse_args()
+        assert args.command == "ex"
+        assert args.archive == "archive.sqsh"
+        assert args.output == "."
+
+    def test_parse_check_abbreviated_args(self, mocker):
+        """Test parsing abbreviated check command arguments."""
+        mocker.patch("sys.argv", ["squish", "c", "archive.sqsh"])
+        args = parse_args()
+        assert args.command == "c"
+        assert args.file == "archive.sqsh"
+
+    def test_parse_build_abbreviated_args(self, mocker):
+        """Test parsing abbreviated build command arguments."""
+        mocker.patch("sys.argv", ["squish", "b", "source", "output.sqsh"])
+        args = parse_args()
+        assert args.command == "b"
+        assert args.source == "source"
+        assert args.output == "output.sqsh"
 
     def test_parse_verbose_args(self, mocker):
         """Test parsing verbose flag."""
@@ -610,6 +657,542 @@ class TestCLIEdgeCases:
 
 class TestCLICoverageGaps:
     """Test cases to cover missing CLI coverage gaps."""
+
+    def test_resolve_command_explicit_alias(self):
+        """Test resolve_command with explicit alias (line 155)."""
+        from squish.cli import resolve_command
+
+        # Test explicit alias resolution
+        result = resolve_command("m")
+        assert result == "mount"
+
+        result = resolve_command("um")
+        assert result == "unmount"
+
+    def test_resolve_command_full_name(self):
+        """Test resolve_command with full command name (line 158)."""
+        from squish.cli import resolve_command
+
+        # Test full command name resolution
+        result = resolve_command("mount")
+        assert result == "mount"
+
+        result = resolve_command("unmount")
+        assert result == "unmount"
+
+    def test_resolve_command_prefix_matching(self):
+        """Test resolve_command with prefix matching (lines 161-164)."""
+        from squish.cli import resolve_command
+
+        # Test prefix matching for longer abbreviations
+        result = resolve_command("mo")
+        assert result == "mount"
+
+        result = resolve_command("unm")
+        assert result == "unmount"
+
+        result = resolve_command("li")
+        assert result == "list"
+
+    def test_resolve_command_ambiguous_error(self):
+        """Test resolve_command with ambiguous command error (lines 165-167)."""
+        import squish.cli
+
+        # Temporarily modify ALL_COMMANDS to create an ambiguous situation
+        original_commands = squish.cli.ALL_COMMANDS.copy()
+        try:
+            # Add commands that would make "test" ambiguous
+            squish.cli.ALL_COMMANDS.append("testing")
+            squish.cli.ALL_COMMANDS.append("testrun")
+
+            # Test ambiguous command error - "test" could match "testing" or "testrun"
+            with pytest.raises(ValueError) as exc_info:
+                squish.cli.resolve_command(
+                    "test"
+                )  # Should be ambiguous between "testing" and "testrun"
+
+            assert "Ambiguous command 'test'" in str(exc_info.value)
+            assert "testing" in str(exc_info.value)
+            assert "testrun" in str(exc_info.value)
+        finally:
+            # Restore original commands
+            squish.cli.ALL_COMMANDS = original_commands
+
+    def test_resolve_command_unknown_with_suggestions(self):
+        """Test resolve_command with unknown command and suggestions (lines 169-174)."""
+        from squish.cli import resolve_command
+
+        # Test unknown command with suggestions
+        with pytest.raises(ValueError) as exc_info:
+            resolve_command("xyz")
+
+        assert "Unknown command 'xyz'" in str(exc_info.value)
+        # Should not have suggestions since "xyz" doesn't match any command
+
+    def test_resolve_command_unknown_without_suggestions(self):
+        """Test resolve_command with unknown command without suggestions."""
+        from squish.cli import resolve_command
+
+        # Test unknown command without suggestions
+        with pytest.raises(ValueError) as exc_info:
+            resolve_command("completely_unknown")
+
+        assert "Unknown command 'completely_unknown'" in str(exc_info.value)
+
+    def test_resolve_command_partial_match_suggestions(self):
+        """Test resolve_command with partial match suggestions."""
+        import squish.cli
+
+        # Temporarily modify ALL_COMMANDS to create a scenario with suggestions
+        original_commands = squish.cli.ALL_COMMANDS.copy()
+        try:
+            # Add a command that contains a specific substring but won't match as prefix
+            squish.cli.ALL_COMMANDS.append("xmunch")
+
+            # Test unknown command with partial match suggestions
+            # "mun" is contained in "xmunch" but "mun" is not a prefix of "xmunch"
+            with pytest.raises(ValueError) as exc_info:
+                squish.cli.resolve_command(
+                    "mun"
+                )  # Should trigger suggestions for "xmunch"
+
+            error_msg = str(exc_info.value)
+            assert "Unknown command 'mun'" in error_msg
+            assert "Did you mean:" in error_msg
+            assert "xmunch" in error_msg
+        finally:
+            # Restore original commands
+            squish.cli.ALL_COMMANDS = original_commands
+
+    def test_handle_list_operation_success_with_logger(self, mocker):
+        """Test handle_list_operation success with logger (line 310-311)."""
+        from squish.cli import handle_list_operation
+
+        mock_manager = mocker.MagicMock()
+        mock_logger = mocker.MagicMock()
+
+        # Should not raise an exception
+        handle_list_operation(mock_manager, "archive.sqsh", logger=mock_logger)
+        mock_manager.list_squashfs.assert_called_once_with("archive.sqsh")
+
+    def test_handle_list_operation_success_no_logger(self, mocker):
+        """Test handle_list_operation success without logger (line 312-313)."""
+        from squish.cli import handle_list_operation
+
+        mock_manager = mocker.MagicMock()
+
+        # Should not raise an exception
+        handle_list_operation(mock_manager, "archive.sqsh", logger=None)
+        mock_manager.list_squashfs.assert_called_once_with("archive.sqsh")
+
+    def test_handle_list_operation_failure_with_logger(self, mocker):
+        """Test handle_list_operation failure with logger (line 315-317)."""
+        from squish.cli import handle_list_operation
+        from squish.errors import ListError
+
+        mock_manager = mocker.MagicMock()
+        mock_manager.list_squashfs.side_effect = ListError("List failed")
+        mock_logger = mocker.MagicMock()
+
+        with pytest.raises(SystemExit):
+            handle_list_operation(mock_manager, "archive.sqsh", logger=mock_logger)
+
+        mock_logger.logger.error.assert_called_once_with(
+            "List operation failed: List failed"
+        )
+
+    def test_handle_list_operation_failure_no_logger(self, mocker):
+        """Test handle_list_operation failure without logger (line 318-320)."""
+        from squish.cli import handle_list_operation
+        from squish.errors import ListError
+
+        mock_manager = mocker.MagicMock()
+        mock_manager.list_squashfs.side_effect = ListError("List failed")
+
+        mock_print = mocker.patch("builtins.print")
+
+        # Mock sys.exit to raise SystemExit
+        def mock_exit(code):
+            raise SystemExit(code)
+
+        mocker.patch("sys.exit", side_effect=mock_exit)
+
+        with pytest.raises(SystemExit):
+            handle_list_operation(mock_manager, "archive.sqsh", logger=None)
+
+        # Verify that the error message was printed
+        mock_print.assert_called_once_with("List operation failed: List failed")
+
+    def test_handle_extract_operation_success_with_logger(self, mocker):
+        """Test handle_extract_operation success with logger (line 338-339)."""
+        from squish.cli import handle_extract_operation
+
+        mock_manager = mocker.MagicMock()
+        mock_logger = mocker.MagicMock()
+
+        # Should not raise an exception
+        handle_extract_operation(
+            mock_manager, "archive.sqsh", "/output", logger=mock_logger
+        )
+        mock_manager.extract_squashfs.assert_called_once_with("archive.sqsh", "/output")
+
+    def test_handle_extract_operation_success_no_logger(self, mocker):
+        """Test handle_extract_operation success without logger (line 340-341)."""
+        from squish.cli import handle_extract_operation
+
+        mock_manager = mocker.MagicMock()
+
+        # Should not raise an exception
+        handle_extract_operation(mock_manager, "archive.sqsh", "/output", logger=None)
+        mock_manager.extract_squashfs.assert_called_once_with("archive.sqsh", "/output")
+
+    def test_handle_extract_operation_failure_with_logger(self, mocker):
+        """Test handle_extract_operation failure with logger (line 343-345)."""
+        from squish.cli import handle_extract_operation
+        from squish.errors import ExtractError
+
+        mock_manager = mocker.MagicMock()
+        mock_manager.extract_squashfs.side_effect = ExtractError("Extract failed")
+        mock_logger = mocker.MagicMock()
+
+        with pytest.raises(SystemExit):
+            handle_extract_operation(
+                mock_manager, "archive.sqsh", "/output", logger=mock_logger
+            )
+
+        mock_logger.logger.error.assert_called_once_with(
+            "Extract operation failed: Extract failed"
+        )
+
+    def test_handle_extract_operation_failure_no_logger(self, mocker):
+        """Test handle_extract_operation failure without logger (line 346-348)."""
+        from squish.cli import handle_extract_operation
+        from squish.errors import ExtractError
+
+        mock_manager = mocker.MagicMock()
+        mock_manager.extract_squashfs.side_effect = ExtractError("Extract failed")
+
+        mock_print = mocker.patch("builtins.print")
+
+        # Mock sys.exit to raise SystemExit
+        def mock_exit(code):
+            raise SystemExit(code)
+
+        mocker.patch("sys.exit", side_effect=mock_exit)
+
+        with pytest.raises(SystemExit):
+            handle_extract_operation(
+                mock_manager, "archive.sqsh", "/output", logger=None
+            )
+
+        # Verify that the error message was printed
+        mock_print.assert_called_once_with("Extract operation failed: Extract failed")
+
+    def test_main_keyboard_interrupt_with_logger(self):
+        """Test main function KeyboardInterrupt handling with logger (line 379-381)."""
+        from squish.cli import main
+
+        # Mock the entire main function flow to trigger KeyboardInterrupt
+        original_parse_args = None
+        original_get_logger = None
+        original_get_config = None
+        original_squashfs_manager = None
+        original_validate_file = None
+
+        def mock_parse_args():
+            class Args:
+                command = "mount"
+                file = "test.sqs"
+                mount_point = None
+                verbose = False
+
+            return Args()
+
+        def mock_get_logger(verbose):
+            class MockLogger:
+                def info(self, msg):
+                    pass
+
+                def error(self, msg):
+                    pass
+
+            class Logger:
+                def __init__(self):
+                    self.logger = MockLogger()
+
+            return Logger()
+
+        def mock_get_config(args):
+            class Config:
+                verbose = False
+
+            return Config()
+
+        def mock_squashfs_manager(config):
+            class Manager:
+                def mount(self, file, mount_point):
+                    raise KeyboardInterrupt()
+
+            return Manager()
+
+        def mock_validate_file(file, operation, logger):
+            pass
+
+        # Apply mocks
+        import squish.cli
+
+        original_parse_args = squish.cli.parse_args
+        original_get_logger = squish.cli.get_logger_from_args
+        original_get_config = squish.cli.get_config_from_args
+        original_squashfs_manager = squish.cli.SquashFSManager
+        original_validate_file = squish.cli.validate_file_exists
+
+        squish.cli.parse_args = mock_parse_args
+        squish.cli.get_logger_from_args = mock_get_logger
+        squish.cli.get_config_from_args = mock_get_config
+        squish.cli.SquashFSManager = mock_squashfs_manager
+        squish.cli.validate_file_exists = mock_validate_file
+
+        try:
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+        finally:
+            # Restore originals
+            squish.cli.parse_args = original_parse_args
+            squish.cli.get_logger_from_args = original_get_logger
+            squish.cli.get_config_from_args = original_get_config
+            squish.cli.SquashFSManager = original_squashfs_manager
+            squish.cli.validate_file_exists = original_validate_file
+
+    def test_main_keyboard_interrupt_no_logger(self, mocker):
+        """Test main function KeyboardInterrupt handling without logger."""
+        from squish.cli import main
+
+        # Mock the entire main function flow to trigger KeyboardInterrupt
+        original_parse_args = None
+        original_get_logger = None
+        original_get_config = None
+        original_squashfs_manager = None
+        original_validate_file = None
+
+        def mock_parse_args():
+            class Args:
+                command = "mount"
+                file = "test.sqs"
+                mount_point = None
+                verbose = False
+
+            return Args()
+
+        def mock_get_logger(verbose):
+            return None  # No logger
+
+        def mock_get_config(args):
+            class Config:
+                verbose = False
+
+            return Config()
+
+        def mock_squashfs_manager(config):
+            class Manager:
+                def mount(self, file, mount_point):
+                    raise KeyboardInterrupt()
+
+            return Manager()
+
+        def mock_validate_file(file, operation, logger):
+            pass
+
+        mock_print = mocker.patch("builtins.print")
+
+        # Mock sys.exit to raise SystemExit
+        def mock_exit(code):
+            raise SystemExit(code)
+
+        # Apply mocks
+        import squish.cli
+
+        original_parse_args = squish.cli.parse_args
+        original_get_logger = squish.cli.get_logger_from_args
+        original_get_config = squish.cli.get_config_from_args
+        original_squashfs_manager = squish.cli.SquashFSManager
+        original_validate_file = squish.cli.validate_file_exists
+
+        squish.cli.parse_args = mock_parse_args
+        squish.cli.get_logger_from_args = mock_get_logger
+        squish.cli.get_config_from_args = mock_get_config
+        squish.cli.SquashFSManager = mock_squashfs_manager
+        squish.cli.validate_file_exists = mock_validate_file
+        mocker.patch("sys.exit", side_effect=mock_exit)
+
+        try:
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+            # Verify that the error message was printed
+            mock_print.assert_called_once_with("\nOperation cancelled by user")
+        finally:
+            # Restore originals
+            squish.cli.parse_args = original_parse_args
+            squish.cli.get_logger_from_args = original_get_logger
+            squish.cli.get_config_from_args = original_get_config
+            squish.cli.SquashFSManager = original_squashfs_manager
+            squish.cli.validate_file_exists = original_validate_file
+
+    def test_main_exception_with_logger(self):
+        """Test main function Exception handling with logger."""
+        from squish.cli import main
+
+        # Mock the entire main function flow to trigger Exception
+        original_parse_args = None
+        original_get_logger = None
+        original_get_config = None
+        original_squashfs_manager = None
+        original_validate_file = None
+
+        def mock_parse_args():
+            class Args:
+                command = "mount"
+                file = "test.sqs"
+                mount_point = None
+                verbose = False
+
+            return Args()
+
+        def mock_get_logger(verbose):
+            class MockLogger:
+                def info(self, msg):
+                    pass
+
+                def error(self, msg):
+                    pass
+
+            class Logger:
+                def __init__(self):
+                    self.logger = MockLogger()
+
+            return Logger()
+
+        def mock_get_config(args):
+            class Config:
+                verbose = False
+
+            return Config()
+
+        def mock_squashfs_manager(config):
+            class Manager:
+                def mount(self, file, mount_point):
+                    raise Exception("Unexpected error")
+
+            return Manager()
+
+        def mock_validate_file(file, operation, logger):
+            pass
+
+        # Apply mocks
+        import squish.cli
+
+        original_parse_args = squish.cli.parse_args
+        original_get_logger = squish.cli.get_logger_from_args
+        original_get_config = squish.cli.get_config_from_args
+        original_squashfs_manager = squish.cli.SquashFSManager
+        original_validate_file = squish.cli.validate_file_exists
+
+        squish.cli.parse_args = mock_parse_args
+        squish.cli.get_logger_from_args = mock_get_logger
+        squish.cli.get_config_from_args = mock_get_config
+        squish.cli.SquashFSManager = mock_squashfs_manager
+        squish.cli.validate_file_exists = mock_validate_file
+
+        try:
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+        finally:
+            # Restore originals
+            squish.cli.parse_args = original_parse_args
+            squish.cli.get_logger_from_args = original_get_logger
+            squish.cli.get_config_from_args = original_get_config
+            squish.cli.SquashFSManager = original_squashfs_manager
+            squish.cli.validate_file_exists = original_validate_file
+
+    def test_main_exception_no_logger(self, mocker):
+        """Test main function Exception handling without logger."""
+        from squish.cli import main
+
+        # Mock the entire main function flow to trigger Exception
+        original_parse_args = None
+        original_get_logger = None
+        original_get_config = None
+        original_squashfs_manager = None
+        original_validate_file = None
+
+        def mock_parse_args():
+            class Args:
+                command = "mount"
+                file = "test.sqs"
+                mount_point = None
+                verbose = False
+
+            return Args()
+
+        def mock_get_logger(verbose):
+            return None  # No logger
+
+        def mock_get_config(args):
+            class Config:
+                verbose = False
+
+            return Config()
+
+        def mock_squashfs_manager(config):
+            class Manager:
+                def mount(self, file, mount_point):
+                    raise Exception("Unexpected error")
+
+            return Manager()
+
+        def mock_validate_file(file, operation, logger):
+            pass
+
+        mock_print = mocker.patch("builtins.print")
+
+        # Mock sys.exit to raise SystemExit
+        def mock_exit(code):
+            raise SystemExit(code)
+
+        # Apply mocks
+        import squish.cli
+
+        original_parse_args = squish.cli.parse_args
+        original_get_logger = squish.cli.get_logger_from_args
+        original_get_config = squish.cli.get_config_from_args
+        original_squashfs_manager = squish.cli.SquashFSManager
+        original_validate_file = squish.cli.validate_file_exists
+
+        squish.cli.parse_args = mock_parse_args
+        squish.cli.get_logger_from_args = mock_get_logger
+        squish.cli.get_config_from_args = mock_get_config
+        squish.cli.SquashFSManager = mock_squashfs_manager
+        squish.cli.validate_file_exists = mock_validate_file
+        mocker.patch("sys.exit", side_effect=mock_exit)
+
+        try:
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+            # Verify that the error message was printed
+            mock_print.assert_called_once_with("Unexpected error: Unexpected error")
+        finally:
+            # Restore originals
+            squish.cli.parse_args = original_parse_args
+            squish.cli.get_logger_from_args = original_get_logger
+            squish.cli.get_config_from_args = original_get_config
+            squish.cli.SquashFSManager = original_squashfs_manager
+            squish.cli.validate_file_exists = original_validate_file
 
     @pytest.mark.parametrize(
         "function_name,import_path,args,kwargs,error_type,error_message,expected_print,expected_exit",

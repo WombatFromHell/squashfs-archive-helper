@@ -11,6 +11,7 @@ from .build import BuildManager
 from .checksum import ChecksumManager
 from .config import SquishFSConfig
 from .dependencies import check_all_dependencies
+from .extract import ExtractManager
 from .list import ListManager
 from .logging import get_logger
 from .mounting import MountManager
@@ -34,6 +35,7 @@ class SquashFSManager:
         self.checksum_manager = ChecksumManager(self.config)
         self.build_manager = BuildManager(self.config)
         self.list_manager = ListManager(self.config)
+        self.extract_manager = ExtractManager(self.config)
 
     def mount(self, file_path: str, mount_point: Optional[str] = None) -> None:
         """Mount a squashfs file."""
@@ -79,3 +81,7 @@ class SquashFSManager:
     def list_squashfs(self, archive: str) -> None:
         """List contents of a SquashFS archive."""
         self.list_manager.list_squashfs(archive)
+
+    def extract_squashfs(self, archive: str, output_dir: Optional[str] = None) -> None:
+        """Extract contents of a SquashFS archive."""
+        self.extract_manager.extract_squashfs(archive, output_dir)

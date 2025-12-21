@@ -13,6 +13,7 @@ import pytest
 from squish.build import BuildManager
 from squish.checksum import ChecksumManager
 from squish.config import SquishFSConfig
+from squish.extract import ExtractManager
 from squish.list import ListManager
 from squish.logging import MountSquashFSLogger
 from squish.mounting import MountManager
@@ -59,6 +60,24 @@ class SquashFSTestDataBuilder:
         self._data[name] = {"type": "directory", "files": files}
         return self
 
+    def with_extract_scenario(
+        self,
+        archive_name: str = "extract_archive.sqsh",
+        archive_content: str = "extract archive content",
+        output_dir: str = "extract_output",
+    ) -> "SquashFSTestDataBuilder":
+        """Add a complete extract test scenario with archive and output directory."""
+        self._data[archive_name] = {
+            "type": "squashfs",
+            "content": archive_content,
+            "role": "extract_archive",
+        }
+        self._data[output_dir] = {
+            "type": "directory",
+            "role": "extract_output",
+        }
+        return self
+
     def build(self, base_path: Path) -> Dict[str, Any]:
         """Build the test data in the specified base path."""
         created_files = {}
@@ -68,6 +87,10 @@ class SquashFSTestDataBuilder:
                 file_path = base_path / name
                 file_path.write_text(data["content"])
                 created_files[name] = file_path
+
+                # If this is an extract archive, add it to the extract_archive key
+                if data.get("role") == "extract_archive":
+                    created_files["extract_archive"] = file_path
             elif data["type"] == "checksum":
                 file_path = base_path / name
                 file_path.write_text(data["content"])
@@ -77,23 +100,29 @@ class SquashFSTestDataBuilder:
                 dir_path.mkdir()
                 created_files[name] = dir_path
 
-                for file_name, file_content in data["files"].items():
-                    if isinstance(file_content, dict):
-                        # Handle nested directories
-                        nested_dir = dir_path / file_name
-                        nested_dir.mkdir()
-                        created_files[f"{name}/{file_name}"] = nested_dir
-                        for nested_file, nested_content in file_content.items():
-                            nested_file_path = nested_dir / nested_file
-                            nested_file_path.write_text(nested_content)
-                            created_files[f"{name}/{file_name}/{nested_file}"] = (
-                                nested_file_path
-                            )
-                    else:
-                        # Handle regular files
-                        file_path = dir_path / file_name
-                        file_path.write_text(file_content)
-                        created_files[f"{name}/{file_name}"] = file_path
+                # If this is an extract output directory, add it to the extract_output key
+                if data.get("role") == "extract_output":
+                    created_files["extract_output"] = dir_path
+
+                # Only process files if they exist in the data
+                if "files" in data:
+                    for file_name, file_content in data["files"].items():
+                        if isinstance(file_content, dict):
+                            # Handle nested directories
+                            nested_dir = dir_path / file_name
+                            nested_dir.mkdir()
+                            created_files[f"{name}/{file_name}"] = nested_dir
+                            for nested_file, nested_content in file_content.items():
+                                nested_file_path = nested_dir / nested_file
+                                nested_file_path.write_text(nested_content)
+                                created_files[f"{name}/{file_name}/{nested_file}"] = (
+                                    nested_file_path
+                                )
+                        else:
+                            # Handle regular files
+                            file_path = dir_path / file_name
+                            file_path.write_text(file_content)
+                            created_files[f"{name}/{file_name}"] = file_path
 
         return created_files
 
@@ -135,6 +164,9 @@ def create_test_scenario(
             .with_checksum_file("archive.sqsh", "custom_checksum_value")
             .build(tmp_path)
         )
+
+    elif scenario_name == "extract_only":
+        return builder.with_extract_scenario().build(tmp_path)
 
     else:
         raise ValueError(f"Unknown scenario: {scenario_name}")
@@ -196,6 +228,12 @@ def list_manager(test_config):
 
 
 @pytest.fixture
+def extract_manager(test_config):
+    """Create an ExtractManager instance for testing."""
+    return ExtractManager(test_config)
+
+
+@pytest.fixture
 def test_files(tmp_path):
     """Create common test files for reuse across tests using the test data builder."""
     # Use the builder to create test files consistently
@@ -223,6 +261,33 @@ def build_test_files(tmp_path):
 def checksum_test_files(tmp_path):
     """Create test files specifically for checksum tests."""
     test_files = create_test_scenario(tmp_path, "checksum_only")
+    # Include tmp_path for convenience
+    test_files["tmp_path"] = tmp_path
+    return test_files
+
+
+@pytest.fixture
+def extract_test_files(tmp_path):
+    """Create test files specifically for extract tests."""
+    # Create a squashfs archive file for extraction
+    archive_file = tmp_path / "test_archive.sqsh"
+    archive_file.write_text("mock squashfs content")
+
+    # Create an existing output directory
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    return {
+        "archive_file": archive_file,
+        "output_dir": output_dir,
+        "tmp_path": tmp_path,
+    }
+
+
+@pytest.fixture
+def extract_scenario_files(tmp_path):
+    """Create test files for extract scenarios using the test data builder."""
+    test_files = create_test_scenario(tmp_path, "extract_only")
     # Include tmp_path for convenience
     test_files["tmp_path"] = tmp_path
     return test_files

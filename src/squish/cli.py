@@ -12,8 +12,20 @@ from typing import Optional
 
 from .config import SquishFSConfig
 from .core import SquashFSManager
-from .errors import BuildError, ListError, SquashFSError
+from .errors import BuildError, ExtractError, ListError, SquashFSError
 from .logging import get_logger
+
+# Command abbreviation system
+COMMAND_ALIASES = {
+    "m": "mount",
+    "um": "unmount",
+    "l": "list",
+    "ex": "extract",
+    "c": "check",
+    "b": "build",
+}
+
+ALL_COMMANDS = ["mount", "unmount", "check", "build", "list", "extract", "ls"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,14 +43,18 @@ def parse_args() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Mount command
-    mount_parser = subparsers.add_parser("mount", help="Mount a SquashFS archive")
+    mount_parser = subparsers.add_parser(
+        "mount", help="Mount a SquashFS archive", aliases=["m"]
+    )
     mount_parser.add_argument("file", help="Path to the .sqs or .squashfs file")
     mount_parser.add_argument(
         "mount_point", nargs="?", default=None, help="Path to mount the squashfs file"
     )
 
     # Unmount command
-    unmount_parser = subparsers.add_parser("unmount", help="Unmount a SquashFS archive")
+    unmount_parser = subparsers.add_parser(
+        "unmount", help="Unmount a SquashFS archive", aliases=["um"]
+    )
     unmount_parser.add_argument("file", help="Path to the .sqs or .squashfs file")
     unmount_parser.add_argument(
         "mount_point", nargs="?", default=None, help="Path to unmount"
@@ -46,12 +62,14 @@ def parse_args() -> argparse.Namespace:
 
     # Check command
     check_parser = subparsers.add_parser(
-        "check", help="Verify checksum of a SquashFS archive"
+        "check", help="Verify checksum of a SquashFS archive", aliases=["c"]
     )
     check_parser.add_argument("file", help="Path to the .sqs or .squashfs file")
 
     # Build command
-    build_parser = subparsers.add_parser("build", help="Create a SquashFS archive")
+    build_parser = subparsers.add_parser(
+        "build", help="Create a SquashFS archive", aliases=["b"]
+    )
     build_parser.add_argument("source", help="Source directory to archive")
     build_parser.add_argument("output", help="Output archive file")
     build_parser.add_argument(
@@ -82,9 +100,21 @@ def parse_args() -> argparse.Namespace:
 
     # List command
     list_parser = subparsers.add_parser(
-        "ls", help="List contents of a SquashFS archive"
+        "ls", help="List contents of a SquashFS archive", aliases=["l"]
     )
     list_parser.add_argument("archive", help="Path to the SquashFS archive")
+
+    # Extract command
+    extract_parser = subparsers.add_parser(
+        "extract", help="Extract a SquashFS archive", aliases=["ex"]
+    )
+    extract_parser.add_argument("archive", help="Path to the SquashFS archive")
+    extract_parser.add_argument(
+        "-o",
+        "--output",
+        default=".",
+        help="Output directory (default: current directory)",
+    )
 
     return parser.parse_args()
 
@@ -95,6 +125,55 @@ def get_config_from_args(args: argparse.Namespace) -> SquishFSConfig:
     if args.verbose:
         config.verbose = True
     return config
+
+
+def resolve_command(command: str) -> str:
+    """Resolve command abbreviations to full command names using hybrid approach.
+
+    1. First check explicit aliases
+    2. Then check if it's already a full command name
+    3. Finally try prefix matching for longer abbreviations
+
+    Args:
+        command: The command or abbreviation to resolve
+
+    Returns:
+        The resolved full command name
+
+    Raises:
+        ValueError: If command is ambiguous or unknown
+    """
+    # 1. Check explicit aliases first
+    if command in COMMAND_ALIASES:
+        return COMMAND_ALIASES[command]
+
+    # 2. Check if it's already a full command name
+    if command in ALL_COMMANDS:
+        return command
+
+    # 3. Try prefix matching for longer abbreviations
+    matches = [cmd for cmd in ALL_COMMANDS if cmd.startswith(command)]
+
+    if len(matches) == 1:
+        return matches[0]
+    elif len(matches) > 1:
+        raise ValueError(
+            f"Ambiguous command '{command}': could be {', '.join(matches)}"
+        )
+    else:
+        # Provide helpful suggestions
+        suggestions = []
+        for full_cmd in ALL_COMMANDS:
+            if command in full_cmd:  # contains the characters, not necessarily prefix
+                suggestions.append(full_cmd)
+
+        suggestion_msg = ""
+        if suggestions:
+            suggestion_msg = f" Did you mean: {', '.join(suggestions)}?"
+
+        raise ValueError(
+            f"Unknown command '{command}'. Available commands: {', '.join(ALL_COMMANDS)}{suggestion_msg}"
+        )
 
 
 def get_logger_from_args(args: argparse.Namespace):
@@ -224,6 +303,20 @@ def handle_list_operation(manager: SquashFSManager, archive: str, logger=None) -
         sys.exit(1)
 
 
+def handle_extract_operation(
+    manager: SquashFSManager, archive: str, output_dir: str, logger=None
+) -> None:
+    """Handle the extract operation."""
+    try:
+        manager.extract_squashfs(archive, output_dir)
+    except ExtractError as e:
+        if logger:
+            logger.logger.error(f"Extract operation failed: {e}")
+        else:
+            print(f"Extract operation failed: {e}")
+        sys.exit(1)
+
+
 def main() -> None:
     """Main entry point for the CLI."""
     logger = None
@@ -239,20 +332,30 @@ def main() -> None:
         # Create manager
         manager = SquashFSManager(config)
 
-        # Perform operation based on command
-        if args.command == "mount":
+        # Resolve command abbreviations
+        try:
+            resolved_command = resolve_command(args.command)
+        except ValueError as e:
+            if logger:
+                logger.logger.error(f"Command resolution failed: {e}")
+            else:
+                print(f"Error: {e}")
+            sys.exit(1)
+
+        # Perform operation based on resolved command
+        if resolved_command == "mount":
             validate_file_exists(args.file, "mount", logger)
             handle_mount_operation(manager, args.file, args.mount_point, logger)
 
-        elif args.command == "unmount":
+        elif resolved_command == "unmount":
             validate_file_exists(args.file, "unmount", logger)
             handle_unmount_operation(manager, args.file, args.mount_point, logger)
 
-        elif args.command == "check":
+        elif resolved_command == "check":
             validate_file_exists(args.file, "check", logger)
             handle_check_operation(manager, args.file, logger)
 
-        elif args.command == "build":
+        elif resolved_command == "build":
             validate_directory_exists(args.source, "build", logger)
             handle_build_operation(
                 manager,
@@ -269,9 +372,13 @@ def main() -> None:
                 logger=logger,
             )
 
-        elif args.command == "ls":
+        elif resolved_command == "ls":
             validate_file_exists(args.archive, "list", logger)
             handle_list_operation(manager, args.archive, logger)
+
+        elif resolved_command == "extract":
+            validate_file_exists(args.archive, "extract", logger)
+            handle_extract_operation(manager, args.archive, args.output, logger)
 
     except KeyboardInterrupt:
         if logger:
