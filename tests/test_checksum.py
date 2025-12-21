@@ -613,3 +613,113 @@ class TestChecksumFileValidationEdgeCases:
                         manager._validate_checksum_files(str(test_file))
                     finally:
                         manager._validate_checksum_files = original_method
+
+
+class TestChecksumExceptionCoverage:
+    """Test exception handling paths for checksum functionality."""
+
+    def test_checksum_file_nonexistent_validation(self, mocker):
+        """Test checksum file existence validation failure."""
+        from squish.checksum import ChecksumManager
+        from squish.errors import ChecksumError
+
+        config = SquishFSConfig()
+        manager = ChecksumManager(config)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir) / "test.sqs"
+            test_file.touch()
+            # Don't create checksum file to trigger the validation error
+
+            with pytest.raises(ChecksumError, match="Checksum file does not exist"):
+                manager._validate_checksum_files(str(test_file))
+
+    def test_checksum_file_parsing_error(self, mocker):
+        """Test checksum file parsing error handling."""
+        from squish.checksum import ChecksumManager
+
+        config = SquishFSConfig()
+        manager = ChecksumManager(config)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir) / "test.sqs"
+            checksum_file = Path(temp_dir) / "test.sqs.sha256"
+
+            test_file.touch()
+            # Create a malformed checksum file
+            checksum_file.write_text("This is not a valid checksum file format")
+
+            # The method should return False when target filename is not found
+            result = manager._parse_checksum_file(checksum_file, "test.sqs")
+            assert result is False
+
+    def test_checksum_file_parsing_exception(self, mocker):
+        """Test checksum file parsing exception handling."""
+        from squish.checksum import ChecksumManager
+        from squish.errors import ChecksumError
+
+        config = SquishFSConfig()
+        manager = ChecksumManager(config)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir) / "test.sqs"
+            checksum_file = Path(temp_dir) / "test.sqs.sha256"
+
+            test_file.touch()
+            # Create a checksum file that will cause a parsing exception
+            # Mock the file reading to raise an exception
+            mocker.patch("builtins.open", side_effect=IOError("File read error"))
+
+            with pytest.raises(ChecksumError, match="Failed to read checksum file"):
+                manager._parse_checksum_file(checksum_file, "test.sqs")
+
+    def test_checksum_verification_unexpected_output(self, mocker):
+        """Test unexpected output warning in checksum verification."""
+        from squish.checksum import ChecksumManager
+
+        config = SquishFSConfig()
+        manager = ChecksumManager(config)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir) / "test.sqs"
+            checksum_file = Path(temp_dir) / "test.sqs.sha256"
+
+            test_file.write_text("some content")
+            checksum_file.write_text("abc123 test.sqs")
+
+            # Mock subprocess.run to return unexpected output
+            mock_subprocess = mocker.patch("squish.checksum.subprocess.run")
+            mock_result = mocker.MagicMock()
+            mock_result.stdout = "Unexpected output format"
+            mock_subprocess.return_value = mock_result
+
+            # This should log a warning but not raise an exception
+            manager._execute_checksum_command(checksum_file)
+
+            # Verify warning was logged (we can't easily test logging output here,
+            # but we can verify the method completed without raising an exception)
+
+    def test_checksum_generation_called_process_error(self, mocker):
+        """Test checksum generation CalledProcessError exception handling."""
+        from squish.checksum import ChecksumManager
+        from squish.errors import ChecksumCommandExecutionError
+
+        config = SquishFSConfig()
+        manager = ChecksumManager(config)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir) / "test.sqs"
+            test_file.write_text("some content")
+
+            # Mock subprocess.run to raise CalledProcessError
+            mock_subprocess = mocker.patch("squish.checksum.subprocess.run")
+            mock_subprocess.side_effect = CalledProcessError(
+                1, ["sha256sum", str(test_file)], stderr="Checksum generation failed"
+            )
+
+            with pytest.raises(ChecksumCommandExecutionError) as exc_info:
+                manager._generate_checksum(str(test_file))
+
+            assert exc_info.value.command == "sha256sum"
+            assert exc_info.value.return_code == 1
+            assert "Failed to generate checksum" in exc_info.value.message

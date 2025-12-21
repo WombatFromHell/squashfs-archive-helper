@@ -16,7 +16,11 @@ from .errors import (
     MksquashfsCommandExecutionError,
 )
 from .logging import get_logger
-
+from .progress import (
+    BuildCancelledError,
+    ProgressTracker,
+    ZenityProgressService,
+)
 
 
 class BuildManager:
@@ -30,6 +34,17 @@ class BuildManager:
     def __init__(self, config: Optional[SquishFSConfig] = None):
         self.config = config if config else SquishFSConfig()
         self.logger = get_logger(self.config.verbose)
+
+    def _count_files_in_directory(self, directory: str) -> int:
+        """Count total files in directory for progress estimation."""
+        import os
+
+        total_files = 0
+        for root, dirs, files in os.walk(directory):
+            # Skip hidden directories
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            total_files += len(files)
+        return total_files
 
     def _build_exclude_arguments(
         self,
@@ -76,6 +91,7 @@ class BuildManager:
             block_size,
             "-processors",
             str(processors),
+            "-info",  # Show file processing for progress estimation
         ] + excludes
 
         if self.config.verbose:
@@ -94,7 +110,77 @@ class BuildManager:
                 "mksquashfs", e.returncode, f"Failed to create archive: {e.stderr}"
             )
 
+    def _execute_mksquashfs_command_with_progress(
+        self,
+        source: str,
+        output: str,
+        excludes: list[str],
+        compression: str,
+        block_size: str,
+        processors: int,
+        progress_service=None,  # For dependency injection in tests
+    ) -> None:
+        """Execute mksquashfs command with progress tracking."""
+        command = [
+            "mksquashfs",
+            source,
+            output,
+            "-comp",
+            compression,
+            "-b",
+            block_size,
+            "-processors",
+            str(processors),
+            "-info",  # Show file processing for progress estimation
+        ] + excludes
 
+        if self.config.verbose:
+            self.logger.log_command_execution(" ".join(command))
+
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True,
+            )
+
+            # Create progress service if not provided
+            if progress_service is None:
+                progress_service = ZenityProgressService()
+
+            # Count total files for progress estimation
+            total_files = self._count_files_in_directory(source)
+
+            progress_tracker = ProgressTracker(progress_service)
+            progress_tracker.set_total_files(total_files)
+            progress_service.start(f"Building {output}... (0/{total_files} files)")
+
+            if process.stdout:
+                for line in process.stdout:
+                    progress_tracker.process_output_line(line)
+
+                    if progress_tracker.zenity_service.check_cancelled():
+                        process.terminate()
+                        progress_service.close(success=False)
+                        raise BuildCancelledError("Build cancelled by user")
+
+            process.wait()
+            progress_service.close(success=True)
+
+            if process.returncode != 0:
+                raise MksquashfsCommandExecutionError(
+                    "mksquashfs", process.returncode, "Failed to create archive"
+                )
+
+        except subprocess.CalledProcessError as e:
+            if progress_service:
+                progress_service.close(success=False)
+            raise MksquashfsCommandExecutionError(
+                "mksquashfs", e.returncode, f"Failed to create archive: {e.stderr}"
+            )
 
     def build_squashfs(
         self,
@@ -107,6 +193,7 @@ class BuildManager:
         compression: str = "zstd",
         block_size: str = "1M",
         processors: int | None = None,
+        progress: bool = False,
         progress_service=None,  # For dependency injection in tests
     ) -> None:
         """Build a SquashFS archive with optional excludes."""
@@ -126,8 +213,6 @@ class BuildManager:
         # Check build dependencies
         self._check_build_dependencies()
 
-
-
         # Determine processors if not specified
         if processors is None:
             try:
@@ -143,16 +228,27 @@ class BuildManager:
             excludes, exclude_file, wildcards, regex
         )
 
-        # Execute mksquashfs command
-        self._execute_mksquashfs_command(
-            source,
-            output,
-            exclude_args,
-            compression,
-            block_size,
-            processors,
-            progress_service,
-        )
+        # Execute mksquashfs command with or without progress
+        if progress:
+            self._execute_mksquashfs_command_with_progress(
+                source,
+                output,
+                exclude_args,
+                compression,
+                block_size,
+                processors,
+                progress_service,
+            )
+        else:
+            self._execute_mksquashfs_command(
+                source,
+                output,
+                exclude_args,
+                compression,
+                block_size,
+                processors,
+                progress_service,
+            )
 
         # Generate checksum after successful build
         self._generate_checksum(output)
@@ -192,7 +288,6 @@ class BuildManager:
         """Check for build-specific dependencies."""
         import subprocess
 
-        from .errors import DependencyError
         from .logging import get_logger
 
         logger = get_logger(self.config.verbose)

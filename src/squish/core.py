@@ -58,7 +58,7 @@ class SquashFSManager:
         compression: str = "zstd",
         block_size: str = "1M",
         processors: int | None = None,
-        kdialog: bool = False,
+        progress: bool = False,
         progress_service=None,
     ) -> None:
         """Build a SquashFS archive."""
@@ -72,7 +72,7 @@ class SquashFSManager:
             compression,
             block_size,
             processors,
-            kdialog,
+            progress,
             progress_service,
         )
 

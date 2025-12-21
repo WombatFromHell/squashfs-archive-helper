@@ -4,8 +4,6 @@ Test cases for the core module.
 This module tests the core functionality of the SquashFSManager class.
 """
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from squish.config import SquishFSConfig
@@ -70,7 +68,7 @@ class TestSquashFSManagerFunctionality:
         # Mock dependencies
         mocker.patch("squish.dependencies.check_all_dependencies")
         mock_mount_manager = mocker.patch("squish.core.MountManager")
-        mock_instance = MagicMock()
+        mock_instance = mocker.MagicMock()
         mock_mount_manager.return_value = mock_instance
 
         manager = SquashFSManager()
@@ -87,7 +85,7 @@ class TestSquashFSManagerFunctionality:
         # Mock dependencies
         mocker.patch("squish.dependencies.check_all_dependencies")
         mock_mount_manager = mocker.patch("squish.core.MountManager")
-        mock_instance = MagicMock()
+        mock_instance = mocker.MagicMock()
         mock_mount_manager.return_value = mock_instance
 
         manager = SquashFSManager()
@@ -104,7 +102,7 @@ class TestSquashFSManagerFunctionality:
         # Mock dependencies
         mocker.patch("squish.dependencies.check_all_dependencies")
         mock_checksum_manager = mocker.patch("squish.core.ChecksumManager")
-        mock_instance = MagicMock()
+        mock_instance = mocker.MagicMock()
         mock_checksum_manager.return_value = mock_instance
 
         manager = SquashFSManager()
@@ -121,7 +119,7 @@ class TestSquashFSManagerFunctionality:
         # Mock dependencies
         mocker.patch("squish.dependencies.check_all_dependencies")
         mock_build_manager = mocker.patch("squish.core.BuildManager")
-        mock_instance = MagicMock()
+        mock_instance = mocker.MagicMock()
         mock_build_manager.return_value = mock_instance
 
         manager = SquashFSManager()
@@ -148,7 +146,7 @@ class TestSquashFSManagerFunctionality:
             "xz",
             "4M",
             4,
-            False,
+            False,  # progress parameter (default value)
             None,
         )
 
@@ -157,7 +155,7 @@ class TestSquashFSManagerFunctionality:
         # Mock dependencies
         mocker.patch("squish.dependencies.check_all_dependencies")
         mock_list_manager = mocker.patch("squish.core.ListManager")
-        mock_instance = MagicMock()
+        mock_instance = mocker.MagicMock()
         mock_list_manager.return_value = mock_instance
 
         manager = SquashFSManager()

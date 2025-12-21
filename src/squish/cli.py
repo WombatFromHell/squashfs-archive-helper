@@ -76,6 +76,9 @@ def parse_args() -> argparse.Namespace:
     build_parser.add_argument(
         "-p", "--processors", type=int, help="Number of processors (default: auto)"
     )
+    build_parser.add_argument(
+        "-P", "--progress", action="store_true", help="Show progress dialog with Zenity"
+    )
 
     # List command
     list_parser = subparsers.add_parser(
@@ -184,6 +187,7 @@ def handle_build_operation(
     compression: str = "zstd",
     block_size: str = "1M",
     processors: int | None = None,
+    progress: bool = False,
     logger=None,
 ) -> None:
     """Handle the build operation."""
@@ -198,6 +202,7 @@ def handle_build_operation(
             compression=compression,
             block_size=block_size,
             processors=processors,
+            progress=progress,
         )
     except BuildError as e:
         if logger:
@@ -260,6 +265,7 @@ def main() -> None:
                 compression=args.compression,
                 block_size=args.block_size,
                 processors=args.processors,
+                progress=args.progress,
                 logger=logger,
             )
 

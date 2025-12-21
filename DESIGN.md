@@ -5,6 +5,7 @@ This document provides a concise overview of the squish project's architecture a
 ## Project Overview
 
 **squish** is a Python-based utility for comprehensive management of SquashFS filesystems, providing:
+
 - Mounting and unmounting SquashFS archives
 - Building SquashFS archives from source directories
 - Listing contents of SquashFS archives
@@ -66,6 +67,10 @@ classDiagram
         +MountSquashFSLogger()
     }
 
+    class Dependencies {
+        +check_all_dependencies()
+    }
+
     CLI --> Core : Uses
     Core --> Mounting : Uses
     Core --> Build : Uses
@@ -111,6 +116,7 @@ classDiagram
 - `-c, --compression`: Compression algorithm (default: zstd)
 - `-b, --block-size`: Block size (default: 1M)
 - `-p, --processors`: Number of processors (default: auto)
+- `-P, --progress`: Show progress dialog with Zenity (falls back to console if Zenity unavailable)
 
 ## Key Features
 
@@ -129,6 +135,10 @@ classDiagram
 - **Parallel processing** with automatic processor detection
 - **Automatic checksum generation** (SHA256)
 - **Validation** to prevent overwriting existing files
+- **Real-time progress tracking** with Zenity progress dialog (with console fallback)
+- **Cancel button support** for interrupting build operations
+- **Progress parsing** from mksquashfs output
+- **Graceful fallback** to console progress when Zenity is unavailable
 
 ### Checksum Verification
 
@@ -193,6 +203,7 @@ classDiagram
 - **DependencyError**: Missing system tools
 - **MountError/UnmountError**: Mount operation failures
 - **BuildError**: Archive creation failures
+- **BuildCancelledError**: Build cancellation by user
 - **ChecksumError**: Verification failures
 - **ConfigError**: Invalid configuration
 - **MountPointError**: Mount point validation issues
@@ -209,11 +220,12 @@ classDiagram
 
 ### Key Test Components
 
-- **`test_files`**: Basic test files fixture
-- **`build_test_files`**: Build-focused test files
-- **`checksum_test_files`**: Checksum verification tests
+- **`test_files`**: Basic test files (squashfs, checksum, source directory)
+- **`build_test_files`**: Build-focused test files with nested directories
+- **`checksum_test_files`**: Checksum verification test files
 - **`test_data_builder`**: Custom test data creation
-- **Module-specific fixtures**: For each major module
+- **`test_config`**: Test configuration with isolated temp directory
+- **`build_manager`**, `checksum_manager`, `mount_manager`, `list_manager`: Module-specific managers
 
 ## Logging
 
@@ -240,17 +252,92 @@ classDiagram
 - **unsquashfs**: For listing contents
 - **sha256sum**: For checksum operations
 - **nproc**: For processor count detection
+- **zenity**: For progress dialog (optional, required for `-P` flag graphical interface, with console fallback)
 
 ### Platform Support
 
 - **Linux**: Full functionality
 - **Other platforms**: Limited functionality (dependency-based)
 
+## Progress Tracking
+
+### Overview
+
+The progress tracking feature provides real-time visualization of SquashFS archive creation with cancel button support.
+
+### Components
+
+```mermaid
+classDiagram
+    class ProgressParser {
+        +parse_mksquashfs_progress(line: str)
+        +PROGRESS_PATTERN
+        +PERCENTAGE_PATTERN
+    }
+
+    class ZenityProgressService {
+        +start(initial_text: str)
+        +update(progress: MksquashfsProgress)
+        +check_cancelled()
+        +close(success: bool)
+    }
+
+    class ProgressTracker {
+        +process_output_line(line: str)
+        +last_progress: MksquashfsProgress
+    }
+
+    class MksquashfsProgress {
+        +current_files: int
+        +total_files: int
+        +percentage: int
+    }
+
+    ProgressParser --> MksquashfsProgress : Creates
+    ZenityProgressService --> MksquashfsProgress : Uses
+    ProgressTracker --> ZenityProgressService : Uses
+    ProgressTracker --> ProgressParser : Uses
+```
+
+### Features
+
+- **Real-time Progress Parsing**: Extracts percentage and file counts from mksquashfs output
+- **Zenity Integration**: Interactive progress dialog with cancel button
+- **Console Fallback**: Automatic fallback to console progress when Zenity is unavailable
+- **Cancel Support**: Graceful termination of build process on user cancellation
+- **Error Handling**: Comprehensive validation and error recovery
+
+### Data Structures
+
+- **MksquashfsProgress**: Immutable dataclass for progress information
+- **ProgressParseError**: Exception for malformed progress data
+- **BuildCancelledError**: Exception for user-initiated cancellation
+
+### Technical Details
+
+- **Parser**: Regex-based extraction with comprehensive validation
+- **Zenity Service**: Subprocess management with stdin communication and automatic fallback
+- **Progress Tracker**: State management and coordination with fallback support
+- **Integration**: Seamless integration with existing build process
+- **Fallback Mechanism**: Graceful handling of missing Zenity dependency
+
+### Fallback Behavior
+
+The progress tracking system includes a robust fallback mechanism:
+
+- **Automatic Detection**: System automatically detects if Zenity is unavailable
+- **Console Fallback**: Falls back to console-based progress reporting when Zenity is missing
+- **Continuous Operation**: Build process continues uninterrupted regardless of Zenity availability
+- **User Notification**: Appropriate warnings are logged when fallback mode is activated
+- **Feature Parity**: All progress tracking features remain available in console mode
+
 ## Conclusion
 
 squish provides a comprehensive, modular solution for SquashFS management with:
+
 - **Clean architecture** with separation of concerns
 - **Robust error handling** with detailed error types
 - **Comprehensive testing** with high coverage
 - **User-friendly interface** with clear logging
 - **Flexible configuration** for different use cases
+- **Real-time progress tracking** with cancel support
