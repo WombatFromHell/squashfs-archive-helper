@@ -16,5 +16,18 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = "src"
 testpaths = ["tests"]
-addopts = "--cov=src/squish --cov-report=term-missing --cov-branch -v"
+addopts = "--cov=src/squish --cov-report=term-missing --cov-branch -xvs"
 filterwarnings = "ignore::DeprecationWarning"
+
+markers = [
+  "slow: marks tests as slow (deselect with '-m not slow')",
+  "integration: marks integration tests (deselect with '-m not integration')",
+  "unit: marks unit tests (deselect with '-m not unit')",
+  "regression: marks regression tests for known issues",
+  "coverage: marks tests specifically targeting coverage gaps",
+  "edge_case: marks tests for edge cases and boundary conditions",
+  "performance: marks performance-sensitive tests",
+  "requires_zenity: marks tests that require Zenity for GUI features",
+  "requires_sudo: marks tests that require sudo privileges",
+  "network: marks tests that require network access",
+]

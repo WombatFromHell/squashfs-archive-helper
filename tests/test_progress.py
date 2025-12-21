@@ -5,6 +5,7 @@ This module tests the mksquashfs progress parser and related functionality.
 """
 
 import logging
+import subprocess
 
 import pytest
 
@@ -664,4 +665,117 @@ class TestIntegrationScenarios:
         assert any(
             "Build completed successfully" in record.message
             for record in caplog.records
+        )
+
+
+class TestProgressCoverageGaps:
+    """Test specific coverage gaps in progress.py."""
+
+    def test_zenity_service_update_without_stdin(self, mocker):
+        """Test Zenity service update when stdin is None (covers line 140)."""
+        service = ZenityProgressService()
+
+        # Mock the process to have None stdin
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = None
+        service.process = mock_process
+
+        progress = MksquashfsProgress(current_files=50, total_files=100, percentage=50)
+
+        # This should raise RuntimeError because stdin is None
+        with pytest.raises(RuntimeError) as exc_info:
+            service.update(progress)
+
+        assert "Zenity progress dialog not started" in str(exc_info.value)
+
+    def test_zenity_service_update_zero_total_files(self, mocker, caplog):
+        """Test Zenity service update when total_files is 0 (covers line 180)."""
+        service = ZenityProgressService()
+
+        # Create a mock process with stdin
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        service.process = mock_process
+
+        # Create a mock progress object that bypasses validation
+        mock_progress = mocker.MagicMock(spec=MksquashfsProgress)
+        mock_progress.current_files = 0
+        mock_progress.total_files = 0  # This will trigger the zero total files path
+        mock_progress.percentage = 50
+
+        # This should handle the zero total files case
+        with caplog.at_level(logging.INFO):
+            service.update(mock_progress)
+
+        # Verify the status text was written for 0 total files case
+        mock_process.stdin.write.assert_called_with("# Processing: 50% complete\n")
+
+    def test_zenity_service_close_without_success(self, mocker, caplog):
+        """Test Zenity service close when not successful (covers line 205)."""
+        service = ZenityProgressService()
+
+        # Set process to None to trigger console fallback mode
+        service.process = None
+
+        # Close with success=False
+        with caplog.at_level(logging.WARNING):
+            service.close(success=False)
+
+        # Verify warning was logged
+        assert any(
+            "Build completed with issues" in record.message for record in caplog.records
+        )
+
+    def test_zenity_service_close_without_stdin(self, mocker):
+        """Test Zenity service close when stdin is None (covers line 209)."""
+        service = ZenityProgressService()
+
+        # Mock the process to have None stdin
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = None
+        service.process = mock_process
+
+        # This should handle the None stdin case gracefully
+        service.close(success=True)
+
+        # Verify no exception was raised and process was cleaned up
+        assert service.process is None
+
+    def test_zenity_service_close_timeout_handling(self, mocker):
+        """Test Zenity service close with timeout handling (covers line 220)."""
+        service = ZenityProgressService()
+
+        # Create a mock process that will timeout
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        mock_process.wait.side_effect = subprocess.TimeoutExpired("test", 1)
+        service.process = mock_process
+
+        # This should handle the timeout and kill the process
+        service.close(success=True)
+
+        # Verify process.kill was called
+        mock_process.kill.assert_called_once()
+        assert service.process is None
+
+    def test_progress_tracker_file_processing_status(self, mocker):
+        """Test progress tracker file processing status update (covers line 269)."""
+        service = ZenityProgressService()
+        tracker = ProgressTracker(service)
+
+        # Mock the process to have stdin
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        service.process = mock_process
+
+        # Mock check_cancelled to return False to avoid cancellation
+        mocker.patch.object(service, "check_cancelled", return_value=False)
+
+        # Process a file line without total files set
+        file_line = "file ./test.txt, uncompressed size 1024 bytes"
+        tracker.process_output_line(file_line)
+
+        # Verify status text was written for file processing
+        mock_process.stdin.write.assert_called_with(
+            "# Processing files: 1 files processed\n"
         )

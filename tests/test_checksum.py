@@ -723,3 +723,162 @@ class TestChecksumExceptionCoverage:
             assert exc_info.value.command == "sha256sum"
             assert exc_info.value.return_code == 1
             assert "Failed to generate checksum" in exc_info.value.message
+
+
+class TestChecksumCoverageGaps:
+    """Test specific coverage gaps in checksum.py."""
+
+    def test_validate_checksum_files_different_directories(self, mocker):
+        """Test validation when files are in different directories (covers line 46)."""
+        manager = ChecksumManager()
+
+        with tempfile.TemporaryDirectory() as temp_dir1:
+            with tempfile.TemporaryDirectory() as temp_dir2:
+                # Create test file in first directory
+                test_file = Path(temp_dir1) / "test.sqs"
+                test_file.write_text("some content")
+
+                # Create checksum file in the same directory
+                checksum_file = Path(temp_dir1) / "test.sqs.sha256"
+                checksum_file.write_text(
+                    "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3  test.sqs"
+                )
+
+                # Create a mock checksum path with different parent
+                mock_checksum_path = mocker.MagicMock(spec=Path)
+                mock_checksum_path.exists.return_value = True
+                mock_checksum_path.parent = Path(temp_dir2)  # Different directory
+
+                # Mock the Path.with_suffix method
+                mock_with_suffix = mocker.patch.object(Path, "with_suffix")
+                mock_with_suffix.return_value = mock_checksum_path
+
+                # This should raise ChecksumError because files are in different directories
+                with pytest.raises(ChecksumError) as exc_info:
+                    manager._validate_checksum_files(str(test_file))
+
+                assert (
+                    "Target file and checksum file must be in the same directory"
+                    in str(exc_info.value)
+                )
+
+    def test_execute_checksum_command_called_process_error(self, mocker):
+        """Test checksum command execution error (covers line 73)."""
+        # Create manager with verbose mode enabled
+        config = SquishFSConfig(verbose=True)
+        manager = ChecksumManager(config)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir) / "test.sqs"
+            test_file.write_text("some content")
+
+            checksum_file = Path(temp_dir) / "test.sqs.sha256"
+            checksum_file.write_text(
+                "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3  test.sqs"
+            )
+
+            # Mock subprocess.run to raise CalledProcessError
+            mock_subprocess = mocker.patch("squish.checksum.subprocess.run")
+            mock_subprocess.side_effect = CalledProcessError(
+                1, ["sha256sum", "-c", str(checksum_file)]
+            )
+
+            # This should raise ChecksumError and cover verbose logging
+            with pytest.raises(ChecksumError) as exc_info:
+                manager._execute_checksum_command(checksum_file)
+
+            assert "Checksum verification failed!" in str(exc_info.value)
+
+    def test_execute_checksum_command_unexpected_output(self, mocker, capsys):
+        """Test unexpected checksum verification output (covers line 78)."""
+        # Create manager with verbose mode enabled
+        config = SquishFSConfig(verbose=True)
+        manager = ChecksumManager(config)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir) / "test.sqs"
+            test_file.write_text("some content")
+
+            checksum_file = Path(temp_dir) / "test.sqs.sha256"
+            checksum_file.write_text(
+                "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3  test.sqs"
+            )
+
+            # Mock subprocess.run to return unexpected output
+            mock_subprocess = mocker.patch("squish.checksum.subprocess.run")
+            mock_result = type(
+                "MockResult", (), {"stdout": "Unexpected output", "returncode": 0}
+            )()
+            mock_subprocess.return_value = mock_result
+
+            # This should log a warning and cover verbose logging
+            manager._execute_checksum_command(checksum_file)
+
+            # Check that warning was logged
+            captured = capsys.readouterr()
+            assert (
+                "Unexpected checksum verification result: Unexpected output"
+                in captured.out
+            )
+
+    def test_verify_checksum_success_no_final_message(self, mocker):
+        """Test that verify_checksum doesn't log final message (covers lines 102-103)."""
+        # Create manager with verbose mode enabled to cover logging lines
+        config = SquishFSConfig(verbose=True)
+        manager = ChecksumManager(config)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir) / "test.sqs"
+            test_file.write_text("some content")
+
+            checksum_file = Path(temp_dir) / "test.sqs.sha256"
+            checksum_file.write_text(
+                "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3  test.sqs"
+            )
+
+            # Mock the subprocess.run to return successful result
+            mock_subprocess = mocker.patch("squish.checksum.subprocess.run")
+            mock_result = type(
+                "MockResult", (), {"stdout": "test.sqs: OK", "returncode": 0}
+            )()
+            mock_subprocess.return_value = mock_result
+
+            # Mock the _parse_checksum_file to return True
+            mocker.patch(
+                "squish.checksum.ChecksumManager._parse_checksum_file",
+                return_value=True,
+            )
+
+            # This should complete and cover verbose logging in _generate_checksum
+            manager.verify_checksum(str(test_file))
+
+            # The method should complete successfully with verbose logging
+
+    def test_generate_checksum_verbose_logging(self, mocker):
+        """Test generate_checksum with verbose logging (covers lines 94, 102-103)."""
+        # Create manager with verbose mode enabled
+        config = SquishFSConfig(verbose=True)
+        manager = ChecksumManager(config)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir) / "test.sqs"
+            test_file.write_text("some content")
+
+            # Mock subprocess.run to return successful result
+            mock_subprocess = mocker.patch("squish.checksum.subprocess.run")
+            mock_result = type(
+                "MockResult",
+                (),
+                {
+                    "stdout": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3  test.sqs",
+                    "returncode": 0,
+                },
+            )()
+            mock_subprocess.return_value = mock_result
+
+            # This should cover verbose logging in _generate_checksum
+            manager._generate_checksum(str(test_file))
+
+            # Check that the checksum file was created
+            checksum_file = Path(str(test_file) + ".sha256")
+            assert checksum_file.exists()

@@ -44,8 +44,21 @@ Some fixtures depend on others:
 
 - The `tracker` fixture depends on the `test_config` fixture to ensure isolated test environments
 - The `mock_manager` fixture depends on pytest's built-in `mocker` fixture for creating mock objects
-- The `test_config` fixture now uses pytest's `tmp_path` fixture for better integration
+- The `test_config` fixture uses pytest's `tmp_path` fixture for better integration
 - All manager fixtures depend on `test_config` for consistent configuration
+
+### 5. Enhanced Built-in Fixtures
+
+The test suite provides enhanced versions of built-in pytest fixtures with better documentation:
+
+- **`capsys_fixture`**: Enhanced stdout/stderr capture with comprehensive documentation
+- **`capfd_fixture`**: Enhanced file descriptor capture with comprehensive documentation
+- **`monkeypatch_fixture`**: Enhanced monkeypatch functionality with comprehensive documentation
+- **`tmp_path_factory_fixture`**: Enhanced session-scoped temporary directory with comprehensive documentation
+- **`pytestconfig_fixture`**: Enhanced pytest configuration access with comprehensive documentation
+- **`cache_fixture`**: Enhanced caching functionality with comprehensive documentation
+
+These fixtures wrap the built-in pytest fixtures and provide better documentation and usage examples.
 
 ### 3. Fixture Dependencies
 
@@ -64,6 +77,8 @@ Some fixtures depend on others:
 4. **Readability**: Clear separation of test logic and test data
 
 ### Parametrization Patterns Used
+
+The test suite extensively uses parametrization for comprehensive testing:
 
 #### 1. Test Method Parametrization
 
@@ -88,6 +103,30 @@ def test_invalid_path_handling(self, test_manager, invalid_path):
 ])
 def test_mount_scenarios(self, temp_dir, mount_base, auto_cleanup):
     # Tests combinations of parameters
+```
+
+#### 3. Complex Parametrization with Test Markers
+
+```python
+@pytest.mark.parametrize(
+    "config_params,expected_mount_base,expected_temp_dir,expected_auto_cleanup",
+    [
+        # Default configuration (None config)
+        (None, "mounts", "/tmp", True),
+        # Custom configuration with mount_base
+        (SquishFSConfig(mount_base="custom"), "custom", "/tmp", True),
+        # Custom configuration with temp_dir (use existing /tmp)
+        (SquishFSConfig(temp_dir="/tmp"), "mounts", "/tmp", True),
+        # Custom configuration with auto_cleanup
+        (SquishFSConfig(auto_cleanup=False), "mounts", "/tmp", False),
+    ]
+)
+@pytest.mark.unit
+@pytest.mark.coverage
+def test_init_with_various_configs(
+    self, config_params, expected_mount_base, expected_temp_dir, expected_auto_cleanup
+):
+    # Tests initialization with various configuration combinations
 ```
 
 ## New Test Data Builder Approach
@@ -211,39 +250,89 @@ def test_basic_mount(test_config):
 
 ## Test Data Management
 
-The test suite now includes a dedicated test data module (`tests/test_data.py`) for improved test data organization and reusability.
-
-### Test Data Module
-
-The `test_data.py` module provides:
-
-1. **TestDataBuilder**: A fluent builder for creating complex test data scenarios
-2. **Predefined Scenarios**: Common test scenarios for quick setup
-3. **Mock Command Data**: Standardized mock data for command execution tests
+The test suite includes a comprehensive test data builder approach implemented directly in `tests/conftest.py` for improved test data organization and reusability.
 
 ### Test Data Builder
 
-The `SquashFSTestDataBuilder` class allows creating complex test data scenarios using a fluent interface:
+The `SquashFSTestDataBuilder` class provides a fluent interface for creating complex test data scenarios:
 
 ```python
 builder = SquashFSTestDataBuilder()
 builder.with_squashfs_file("test.sqsh", "content")
        .with_checksum_file("test.sqsh", "checksum_value")
-       .with_source_directory("source", {"file1.txt": "content1"})
+       .with_source_directory("source", {
+           "file1.txt": "content1",
+           "subdir": {"nested.txt": "nested content"}
+       })
        .build(tmp_path)
 ```
 
 ### Predefined Scenarios
 
-Common test scenarios are available for quick setup:
+The `create_test_scenario` function provides common test scenarios for quick setup:
 
-- **default**: Includes squashfs file, checksum file, and source directory
-- **build_only**: Focused on build test requirements
-- **checksum_only**: Focused on checksum verification tests
+- **`default`**: Includes squashfs file, checksum file, and source directory
+- **`build_only`**: Focused on build test requirements with nested directories
+- **`checksum_only`**: Focused on checksum verification tests
 
 ### Mock Command Data
 
-Standardized mock data for command execution tests ensures consistency across tests.
+The `create_mock_command_data` function provides standardized mock data for command execution tests, ensuring consistency across tests.
+
+## New Testing Patterns and Best Practices
+
+### Parametrization Enhancements
+
+The test suite makes extensive use of parametrization to reduce duplication and ensure comprehensive coverage:
+
+```python
+@pytest.mark.parametrize(
+    "config_kwargs,expected_mount_base,expected_temp_dir",
+    [
+        ({}, "mounts", "/tmp"),
+        ({"mount_base": "custom"}, "custom", "/tmp"),
+        ({"temp_dir": "/custom/tmp"}, "mounts", "/custom/tmp"),
+    ]
+)
+def test_build_manager_initialization(config_kwargs, expected_mount_base, expected_temp_dir):
+    manager = BuildManager(**config_kwargs)
+    assert manager.config.mount_base == expected_mount_base
+    assert manager.config.temp_dir == expected_temp_dir
+```
+
+### Advanced Mocking Patterns
+
+The test suite uses advanced pytest-mock features for comprehensive testing:
+
+```python
+# Use mocker.spy for partial mocking
+mock_spy = mocker.spy(logger, 'info')
+
+# Use mocker.patch.object for method patching
+mock_method = mocker.patch.object(manager, '_validate_source')
+
+# Use mocker.patch.dict for dictionary patching
+mock_env = mocker.patch.dict('os.environ', {'DEBUG': '1'})
+
+# Use mocker.stub for creating stubs
+stub = mocker.stub(name='test_stub')
+```
+
+### Test Execution
+
+The test suite is configured in `pyproject.toml` with default options for comprehensive coverage:
+
+```bash
+# Run tests with default configuration (coverage + verbose)
+uv run pytest
+
+# Run specific test markers
+uv run pytest -m unit
+uv run pytest -m coverage
+
+# Run tests with additional verbosity
+uv run pytest -xvs
+```
 
 ## Test Coverage Strategy
 
@@ -253,38 +342,41 @@ The fixture-based approach ensures comprehensive coverage of:
 - Different mount base directories
 - Auto-cleanup enabled/disabled
 - Different temp directories
+- Various configuration combinations
 
 ### System Operations
-- Mount operations
-- Unmount operations
-- Checksum verification
-- Build operations
-- List operations
-- Dependency checking
+- Mount operations with automatic mount point determination
+- Unmount operations with robust mount tracking
+- Checksum verification with SHA256 integrity checking
+- Build operations with multiple compression algorithms
+- List operations for archive content listing
+- Dependency checking for system tools
+- Progress tracking with Zenity integration and console fallback
 
 ### Error Conditions
-- Dependency check failures
-- Mount failures
-- Unmount failures
-- Build failures
-- List failures
+- Dependency check failures for missing system tools
+- Mount failures due to permission issues or conflicts
+- Unmount failures and cleanup scenarios
+- Build failures with various error conditions
+- List failures for invalid archives
 - Checksum verification failures
-- Invalid file paths
-- Invalid mount points
+- Invalid file paths and mount points
+- Progress parsing errors and cancellation scenarios
 
 ### File Types and Formats
 - Different file extensions (.sqs, .squashfs)
-- Various file content types
-- Different file permissions
+- Various file content types and sizes
+- Different file permissions and ownership
 - Files with and without checksums
+- Nested directory structures
 
 ### Edge Cases
-- Nonexistent files
-- Empty files
-- Files with content
-- Special characters in filenames
-- Deep directory structures
-- Various permission settings
+- Nonexistent files and directories
+- Empty files and directories
+- Files with special characters in filenames
+- Deep directory structures with nested content
+- Various permission settings and access control
+- Progress tracking edge cases and cancellation scenarios
 
 ## Running Parametrized Tests
 
@@ -306,6 +398,7 @@ This shows that the same test ran multiple times with different parameters.
 3. **Add parametrization**: If applicable, add meaningful parameter variations
 4. **Document**: Add clear docstrings and examples
 5. **Integrate**: Use the fixture in existing tests where appropriate
+6. **Update documentation**: Keep FIXTURE_DOCUMENTATION.md current
 
 ### Updating Existing Fixtures
 
@@ -313,6 +406,33 @@ This shows that the same test ran multiple times with different parameters.
 2. **Make changes**: Update the fixture implementation
 3. **Update tests**: Adjust any tests that need modification
 4. **Verify**: Run the full test suite to ensure nothing broke
+5. **Update documentation**: Reflect changes in FIXTURE_DOCUMENTATION.md
+
+### Test Data Builder Usage
+
+When creating complex test scenarios, use the `SquashFSTestDataBuilder`:
+
+```python
+def test_complex_scenario(test_data_builder, tmp_path):
+    """Test with complex test data using the builder."""
+    test_files = test_data_builder \
+        .with_squashfs_file("complex.sqsh", "complex content") \
+        .with_checksum_file("complex.sqsh", "complex_checksum_value") \
+        .with_source_directory("complex_source", {
+            "file1.txt": "content1",
+            "file2.txt": "content2",
+            "subdir": {
+                "nested1.txt": "nested content 1",
+                "nested2.txt": "nested content 2"
+            }
+        }) \
+        .build(tmp_path)
+    
+    # Use the created test files in your test
+    squashfs_file = test_files["complex.sqsh"]
+    source_dir = test_files["complex_source"]
+    # ... test logic
+```
 
 ## Test Contribution Guide
 

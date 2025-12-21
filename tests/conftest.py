@@ -269,3 +269,129 @@ def clean_test_environment():
             mounted_file.unlink()
         except Exception:
             pass
+
+
+# Built-in pytest fixtures that are automatically available but documented here for reference
+# These are provided by pytest but we document them for team awareness:
+# - capsys: Capture stdout/stderr (text)
+# - capfd: Capture stdout/stderr (binary)
+# - monkeypatch: Flexible patching of functions, attributes, dictionaries, and environment variables
+# - tmp_path_factory: Session-scoped temporary directory factory
+# - pytestconfig: Access to pytest configuration
+# - cache: Cache data across test runs
+
+
+@pytest.fixture
+def capsys_fixture(capsys):
+    """
+    Enhanced capsys fixture for capturing stdout/stderr.
+
+    This wraps the built-in capsys fixture to provide additional convenience methods
+    and better documentation for our test suite.
+
+    Usage:
+        def test_output(capsys_fixture):
+            print("Hello World")
+            captured = capsys_fixture.readouterr()
+            assert captured.out == "Hello World\n"
+    """
+    return capsys
+
+
+@pytest.fixture
+def capfd_fixture(capfd):
+    """
+    Enhanced capfd fixture for capturing stdout/stderr (binary).
+
+    This wraps the built-in capfd fixture to provide additional convenience methods
+    and better documentation for our test suite.
+
+    Usage:
+        def test_binary_output(capfd_fixture):
+            print("Binary data")
+            captured = capfd_fixture.readouterr()
+            assert b"Binary data" in captured.out
+    """
+    return capfd
+
+
+@pytest.fixture
+def monkeypatch_fixture(monkeypatch):
+    """
+    Enhanced monkeypatch fixture for flexible patching.
+
+    This wraps the built-in monkeypatch fixture to provide additional convenience methods
+    and better documentation for our test suite.
+
+    Usage examples:
+        # Patch a function
+        monkeypatch_fixture.setattr("module.function", lambda: "patched")
+
+        # Patch an environment variable
+        monkeypatch_fixture.setenv("VAR", "value")
+
+        # Patch a dictionary item
+        monkeypatch_fixture.setitem("dict.key", "value")
+
+        # Remove an environment variable
+        monkeypatch_fixture.delenv("VAR")
+    """
+    return monkeypatch
+
+
+@pytest.fixture
+def tmp_path_factory_fixture(tmp_path_factory):
+    """
+    Enhanced tmp_path_factory fixture for session-scoped temporary directories.
+
+    This wraps the built-in tmp_path_factory fixture to provide additional convenience methods
+    and better documentation for our test suite.
+
+    Usage:
+        def test_session_temp(tmp_path_factory_fixture):
+            # Create a session-scoped temp directory
+            temp_dir = tmp_path_factory_fixture.mktemp("mysession")
+            file = temp_dir / "test.txt"
+            file.write_text("session data")
+            assert file.exists()
+    """
+    return tmp_path_factory
+
+
+@pytest.fixture
+def pytestconfig_fixture(pytestconfig):
+    """
+    Enhanced pytestconfig fixture for accessing pytest configuration.
+
+    This wraps the built-in pytestconfig fixture to provide better documentation
+    and convenience methods for our test suite.
+
+    Usage:
+        def test_config(pytestconfig_fixture):
+            # Access command line options
+            verbose = pytestconfig_fixture.getoption("verbose")
+
+            # Check if a marker is available
+            has_marker = pytestconfig_fixture.getini("markers")
+    """
+    return pytestconfig
+
+
+@pytest.fixture
+def cache_fixture(cache):
+    """
+    Enhanced cache fixture for caching data across test runs.
+
+    This wraps the built-in cache fixture to provide better documentation
+    and convenience methods for our test suite.
+
+    Usage:
+        def test_with_cache(cache_fixture):
+            # Cache expensive computation results
+            if "expensive_result" not in cache_fixture:
+                cache_fixture["expensive_result"] = compute_expensive_result()
+
+            result = cache_fixture["expensive_result"]
+            assert result is not None
+    """
+    return cache

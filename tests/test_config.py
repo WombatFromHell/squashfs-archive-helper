@@ -56,9 +56,12 @@ class TestSquishFSConfig:
                 SquishFSConfig(temp_dir=temp_file.name)
 
 
-def test_get_default_config():
-    """Test the get_default_config function."""
-    config = get_default_config()
-    assert isinstance(config, SquishFSConfig)
-    assert config.mount_base == "mounts"
-    assert config.temp_dir == "/tmp"
+class TestConfigFunctions:
+    """Test standalone config functions."""
+
+    def test_get_default_config(self):
+        """Test the get_default_config function."""
+        config = get_default_config()
+        assert isinstance(config, SquishFSConfig)
+        assert config.mount_base == "mounts"
+        assert config.temp_dir == "/tmp"

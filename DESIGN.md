@@ -213,19 +213,94 @@ classDiagram
 
 ### Test Architecture
 
-- **Fixture-based approach** with test data builder
-- **Comprehensive coverage** (90%+ target)
-- **Mocking strategy** for external dependencies
+- **Fixture-based approach** with test data builder (`SquashFSTestDataBuilder`)
+- **Comprehensive coverage** (90%+ target) with branch coverage
+- **Mocking strategy** for external dependencies using pytest-mock
 - **Error path testing** for all operations
+- **Parametrized testing** for comprehensive scenario coverage
+- **Test markers** for categorization and selective execution
+
+### Test Configuration
+
+The test suite is configured in `pyproject.toml` with:
+
+- **Python path**: `src` for proper module imports
+- **Test paths**: `tests` directory
+- **Default options**: `--cov=src/squish --cov-report=term-missing --cov-branch -xvs`
+- **Coverage tracking**: Branch coverage enabled
+- **Warning filtering**: Deprecation warnings ignored
 
 ### Key Test Components
 
-- **`test_files`**: Basic test files (squashfs, checksum, source directory)
+#### Fixtures
+
+- **`test_files`**: Basic test files (squashfs, checksum, source directory) - backward compatible
 - **`build_test_files`**: Build-focused test files with nested directories
 - **`checksum_test_files`**: Checksum verification test files
-- **`test_data_builder`**: Custom test data creation
-- **`test_config`**: Test configuration with isolated temp directory
+- **`test_data_builder`**: Custom test data creation using `SquashFSTestDataBuilder`
+- **`test_config`**: Test configuration with isolated temp directory using pytest's `tmp_path`
 - **`build_manager`**, `checksum_manager`, `mount_manager`, `list_manager`: Module-specific managers
+- **`tracker`**: MountTracker instance for testing
+- **`logger`**: MountSquashFSLogger instance for testing
+- **`mock_manager`**: Mock manager for testing interactions
+
+#### Enhanced Built-in Fixtures
+
+- **`capsys_fixture`**: Enhanced stdout/stderr capture
+- **`capfd_fixture`**: Enhanced binary stdout/stderr capture
+- **`monkeypatch_fixture`**: Enhanced flexible patching
+- **`tmp_path_factory_fixture`**: Enhanced session-scoped temp directory
+- **`pytestconfig_fixture`**: Enhanced pytest configuration access
+- **`cache_fixture`**: Enhanced caching functionality
+
+#### Test Markers
+
+The project uses pytest markers for test categorization (as defined in pyproject.toml):
+
+- **`@pytest.mark.slow`**: Marks tests as slow (deselect with '-m not slow')
+- **`@pytest.mark.integration`**: Marks integration tests (deselect with '-m not integration')
+- **`@pytest.mark.unit`**: Marks unit tests (deselect with '-m not unit')
+- **`@pytest.mark.regression`**: Marks regression tests for known issues
+- **`@pytest.mark.coverage`**: Marks tests specifically targeting coverage gaps
+- **`@pytest.mark.edge_case`**: Marks tests for edge cases and boundary conditions
+- **`@pytest.mark.performance`**: Marks performance-sensitive tests
+- **`@pytest.mark.requires_zenity`**: Marks tests that require Zenity for GUI features
+- **`@pytest.mark.requires_sudo`**: Marks tests that require sudo privileges
+- **`@pytest.mark.network`**: Marks tests that require network access
+
+### Test Data Builder
+
+The `SquashFSTestDataBuilder` class provides a fluent interface for creating complex test scenarios:
+
+```python
+builder = SquashFSTestDataBuilder()
+builder.with_squashfs_file("test.sqsh", "content")
+       .with_checksum_file("test.sqsh", "checksum_value")
+       .with_source_directory("source", {
+           "file1.txt": "content1",
+           "subdir": {"nested.txt": "nested content"}
+       })
+       .build(tmp_path)
+```
+
+### Test Scenarios
+
+The test suite includes predefined scenarios:
+
+- **`default`**: Includes squashfs file, checksum file, and source directory
+- **`build_only`**: Focused on build test requirements with nested directories
+- **`checksum_only`**: Focused on checksum verification tests
+
+### Test Coverage Strategy
+
+The project maintains comprehensive test coverage including:
+
+- **Configuration scenarios**: Different mount base directories, auto-cleanup settings
+- **System operations**: Mount, unmount, checksum verification, build, list operations
+- **Error conditions**: Dependency failures, mount failures, build failures, invalid paths
+- **File types and formats**: Different file extensions, content types, permissions
+- **Edge cases**: Nonexistent files, empty files, special characters, deep directory structures
+- **Progress tracking**: Zenity integration, cancellation scenarios, fallback behavior
 
 ## Logging
 
@@ -312,6 +387,16 @@ classDiagram
 - **MksquashfsProgress**: Immutable dataclass for progress information
 - **ProgressParseError**: Exception for malformed progress data
 - **BuildCancelledError**: Exception for user-initiated cancellation
+
+### Test Coverage
+
+The progress tracking functionality is comprehensively tested in `tests/test_progress.py` including:
+
+- **Progress parsing**: Various mksquashfs output formats and edge cases
+- **Zenity integration**: Progress dialog management and cancellation
+- **Console fallback**: Fallback behavior when Zenity is unavailable
+- **Error handling**: Invalid progress data and cancellation scenarios
+- **Data validation**: MksquashfsProgress dataclass validation
 
 ### Technical Details
 

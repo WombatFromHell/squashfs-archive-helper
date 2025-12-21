@@ -14,7 +14,7 @@
 ## Agent Workflow
 
 1. **Testing**: Use `uv run pytest -xvs` for test execution
-2. **Coverage Analysis**: Use `uv run pytest --cov=src --cov-report=term-missing` to check code coverage
+2. **Coverage Analysis**: Use `uv run pytest --cov=src/squish --cov-report=term-missing --cov-branch` to check code coverage (as configured in pyproject.toml)
 3. **Quality Checks**: Run `make quality` before commits to validate linting/formatting
 4. **Complexity Analysis**: Use `make radon` for refactoring code complexity validation
 5. Building and Deployment: Use `make all` to clean, build, and install locally to `~/.local/bin/mount-squashfs`
@@ -38,9 +38,24 @@ The project maintains a high test coverage standard (90%+). When expanding cover
 
 **Note**: `entry.py` is intentionally not covered by tests as it only serves as an entrypoint for zipapp bundling.
 
+## Test Markers
+
+The project uses pytest markers for test categorization as defined in pyproject.toml:
+
+- **`@pytest.mark.slow`**: Marks tests as slow (deselect with '-m not slow')
+- **`@pytest.mark.integration`**: Marks integration tests (deselect with '-m not integration')
+- **`@pytest.mark.unit`**: Marks unit tests (deselect with '-m not unit')
+- **`@pytest.mark.regression`**: Marks regression tests for known issues
+- **`@pytest.mark.coverage`**: Marks tests specifically targeting coverage gaps
+- **`@pytest.mark.edge_case`**: Marks tests for edge cases and boundary conditions
+- **`@pytest.mark.performance`**: Marks performance-sensitive tests
+- **`@pytest.mark.requires_zenity`**: Marks tests that require Zenity for GUI features
+- **`@pytest.mark.requires_sudo`**: Marks tests that require sudo privileges
+- **`@pytest.mark.network`**: Marks tests that require network access
+
 ## Modern Fixture-Based Testing Approach
 
-The test suite now uses a comprehensive fixture-based approach with test data builders to improve maintainability and reduce duplication.
+The test suite uses a comprehensive fixture-based approach with test data builders to improve maintainability and reduce duplication, as implemented in `tests/conftest.py`.
 
 ### Recommended Testing Patterns
 
@@ -116,12 +131,26 @@ def test_example_new(mocker, build_test_files):
 
 #### Available Fixtures
 
-- **`test_files`**: Basic test files (squashfs, checksum, source directory)
+- **`test_files`**: Basic test files (squashfs, checksum, source directory) - backward compatible
 - **`build_test_files`**: Build-focused test files with nested directories
 - **`checksum_test_files`**: Checksum verification test files
-- **`test_data_builder`**: Custom test data creation
-- **`test_config`**: Test configuration with isolated temp directory
+- **`test_data_builder`**: Custom test data creation using `SquashFSTestDataBuilder`
+- **`test_config`**: Test configuration with isolated temp directory using pytest's `tmp_path`
 - **`build_manager`**, `checksum_manager`, `mount_manager`, `list_manager`: Module-specific managers
+- **`tracker`**: MountTracker instance for testing
+- **`logger`**: MountSquashFSLogger instance for testing
+- **`mock_manager`**: Mock manager for testing interactions
+
+#### Enhanced Built-in Fixtures
+
+The test suite provides enhanced versions of built-in pytest fixtures:
+
+- **`capsys_fixture`**: Enhanced stdout/stderr capture
+- **`capfd_fixture`**: Enhanced binary stdout/stderr capture
+- **`monkeypatch_fixture`**: Enhanced flexible patching
+- **`tmp_path_factory_fixture`**: Enhanced session-scoped temp directory
+- **`pytestconfig_fixture`**: Enhanced pytest configuration access
+- **`cache_fixture`**: Enhanced caching functionality
 
 #### Best Practices
 
@@ -130,6 +159,7 @@ def test_example_new(mocker, build_test_files):
 3. **Keep Test Data Simple**: Only create what's needed for the specific test
 4. **Document Complex Setups**: Add comments explaining non-standard test data
 5. **Maintain Consistency**: Follow existing patterns and naming conventions
+6. **Use Enhanced Fixtures**: Prefer the enhanced fixture versions for better documentation
 
 ## Common Coverage Gaps
 
@@ -141,3 +171,5 @@ Typical areas that often need additional coverage:
 - File permission and access errors
 - Command execution failures
 - Validation failures
+- Progress tracking and cancellation scenarios
+- Zenity integration and fallback behavior
