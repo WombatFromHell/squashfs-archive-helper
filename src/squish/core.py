@@ -82,6 +82,14 @@ class SquashFSManager:
         """List contents of a SquashFS archive."""
         self.list_manager.list_squashfs(archive)
 
-    def extract_squashfs(self, archive: str, output_dir: Optional[str] = None) -> None:
+    def extract_squashfs(
+        self,
+        archive: str,
+        output_dir: Optional[str] = None,
+        progress: bool = False,
+        progress_service=None,
+    ) -> None:
         """Extract contents of a SquashFS archive."""
-        self.extract_manager.extract_squashfs(archive, output_dir)
+        self.extract_manager.extract_squashfs(
+            archive, output_dir, progress=progress, progress_service=progress_service
+        )

@@ -12,26 +12,45 @@ from typing import Optional
 
 from .config import SquishFSConfig
 from .core import SquashFSManager
-from .errors import BuildError, ExtractError, ListError, SquashFSError
+from .errors import (
+    BuildError,
+    ExtractCancelledError,
+    ExtractError,
+    ListError,
+    SquashFSError,
+    XattrError,
+)
 from .logging import get_logger
 
-# Command abbreviation system
+# Command abbreviation system - keep only the most common single-letter aliases
 COMMAND_ALIASES = {
     "m": "mount",
     "um": "unmount",
-    "l": "list",
-    "ex": "extract",
     "c": "check",
     "b": "build",
+    "l": "ls",
+    "ex": "extract",
 }
 
-ALL_COMMANDS = ["mount", "unmount", "check", "build", "list", "extract", "ls"]
+ALL_COMMANDS = ["mount", "unmount", "check", "build", "extract", "ls"]
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments with subcommands."""
     parser = argparse.ArgumentParser(
-        description="SquashFS archive management tool - mount, unmount, build, and list SquashFS archives"
+        description="SquashFS archive management tool - mount, unmount, build, and list SquashFS archives",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Command abbreviations:
+  mount    -> m
+  unmount  -> um
+  check    -> c
+  build    -> b
+  ls       -> l
+  extract  -> ex
+
+Prefix matching is supported for commands (minimum 2 characters).
+For example: 'mou' -> 'mount', 'bu' -> 'build', 'lis' -> 'ls'""".strip(),
     )
 
     # Add global verbose flag
@@ -53,7 +72,9 @@ def parse_args() -> argparse.Namespace:
 
     # Unmount command
     unmount_parser = subparsers.add_parser(
-        "unmount", help="Unmount a SquashFS archive", aliases=["um"]
+        "unmount",
+        help="Unmount a SquashFS archive",
+        aliases=["um"],
     )
     unmount_parser.add_argument("file", help="Path to the .sqs or .squashfs file")
     unmount_parser.add_argument(
@@ -62,7 +83,9 @@ def parse_args() -> argparse.Namespace:
 
     # Check command
     check_parser = subparsers.add_parser(
-        "check", help="Verify checksum of a SquashFS archive", aliases=["c"]
+        "check",
+        help="Verify checksum of a SquashFS archive",
+        aliases=["c"],
     )
     check_parser.add_argument("file", help="Path to the .sqs or .squashfs file")
 
@@ -115,6 +138,12 @@ def parse_args() -> argparse.Namespace:
         default=".",
         help="Output directory (default: current directory)",
     )
+    extract_parser.add_argument(
+        "-P",
+        "--progress",
+        action="store_true",
+        help="Show progress dialog with Zenity (falls back to console if Zenity unavailable)",
+    )
 
     return parser.parse_args()
 
@@ -124,6 +153,7 @@ def get_config_from_args(args: argparse.Namespace) -> SquishFSConfig:
     config = SquishFSConfig()
     if args.verbose:
         config.verbose = True
+
     return config
 
 
@@ -132,7 +162,7 @@ def resolve_command(command: str) -> str:
 
     1. First check explicit aliases
     2. Then check if it's already a full command name
-    3. Finally try prefix matching for longer abbreviations
+    3. Finally try prefix matching for longer abbreviations (minimum 2 characters)
 
     Args:
         command: The command or abbreviation to resolve
@@ -151,29 +181,42 @@ def resolve_command(command: str) -> str:
     if command in ALL_COMMANDS:
         return command
 
-    # 3. Try prefix matching for longer abbreviations
-    matches = [cmd for cmd in ALL_COMMANDS if cmd.startswith(command)]
+    # 3. Try prefix matching for longer abbreviations (minimum 2 characters)
+    if len(command) >= 2:
+        matches = [cmd for cmd in ALL_COMMANDS if cmd.startswith(command)]
 
-    if len(matches) == 1:
-        return matches[0]
-    elif len(matches) > 1:
-        raise ValueError(
-            f"Ambiguous command '{command}': could be {', '.join(matches)}"
-        )
-    else:
-        # Provide helpful suggestions
-        suggestions = []
-        for full_cmd in ALL_COMMANDS:
-            if command in full_cmd:  # contains the characters, not necessarily prefix
-                suggestions.append(full_cmd)
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
+            raise ValueError(
+                f"Ambiguous command '{command}': could be {', '.join(matches)}"
+            )
 
-        suggestion_msg = ""
-        if suggestions:
-            suggestion_msg = f" Did you mean: {', '.join(suggestions)}?"
+    # Provide helpful suggestions
+    suggestions = []
+    for full_cmd in ALL_COMMANDS:
+        if command in full_cmd:  # contains the characters, not necessarily prefix
+            suggestions.append(full_cmd)
 
-        raise ValueError(
-            f"Unknown command '{command}'. Available commands: {', '.join(ALL_COMMANDS)}{suggestion_msg}"
-        )
+    suggestion_msg = ""
+    if suggestions:
+        suggestion_msg = f" Did you mean: {', '.join(suggestions)}?"
+
+    # Also suggest single-letter aliases if available
+    alias_suggestions = []
+    for alias, full_cmd in COMMAND_ALIASES.items():
+        if command.startswith(alias) or alias.startswith(command):
+            alias_suggestions.append(f"{alias} ({full_cmd})")
+
+    if alias_suggestions:
+        if suggestion_msg:
+            suggestion_msg += f" Or try: {', '.join(alias_suggestions)}?"
+        else:
+            suggestion_msg = f" Did you mean: {', '.join(alias_suggestions)}?"
+
+    raise ValueError(
+        f"Unknown command '{command}'. Available commands: {', '.join(ALL_COMMANDS)}{suggestion_msg}"
+    )
 
 
 def get_logger_from_args(args: argparse.Namespace):
@@ -304,11 +347,27 @@ def handle_list_operation(manager: SquashFSManager, archive: str, logger=None) -
 
 
 def handle_extract_operation(
-    manager: SquashFSManager, archive: str, output_dir: str, logger=None
+    manager: SquashFSManager,
+    archive: str,
+    output_dir: str,
+    progress: bool = False,
+    logger=None,
 ) -> None:
     """Handle the extract operation."""
     try:
-        manager.extract_squashfs(archive, output_dir)
+        manager.extract_squashfs(archive, output_dir, progress=progress)
+    except ExtractCancelledError:
+        if logger:
+            logger.logger.info("Extract operation cancelled by user")
+        else:
+            print("Extract operation cancelled by user")
+        sys.exit(0)  # Exit with 0 for user cancellation
+    except XattrError as e:
+        if logger:
+            logger.logger.error(f"Extract operation failed: {e}")
+        else:
+            print(f"Extract operation failed: {e}")
+        sys.exit(2)  # Use exit code 2 for xattr-specific errors
     except ExtractError as e:
         if logger:
             logger.logger.error(f"Extract operation failed: {e}")
@@ -378,7 +437,9 @@ def main() -> None:
 
         elif resolved_command == "extract":
             validate_file_exists(args.archive, "extract", logger)
-            handle_extract_operation(manager, args.archive, args.output, logger)
+            handle_extract_operation(
+                manager, args.archive, args.output, args.progress, logger
+            )
 
     except KeyboardInterrupt:
         if logger:

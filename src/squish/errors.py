@@ -112,3 +112,15 @@ class UnsquashfsExtractCommandExecutionError(CommandExecutionError, ExtractError
     """Exception raised when unsquashfs extract command execution fails."""
 
     pass
+
+
+class ExtractCancelledError(SquashFSError):
+    """Exception raised when extract operation is cancelled by user."""
+
+    pass
+
+
+class XattrError(ExtractError):
+    """Exception raised when xattr-related operations fail."""
+
+    pass

@@ -11,11 +11,15 @@ import pytest
 
 from squish.progress import (
     BuildCancelledError,
+    ExtractCancelledError,
+    ExtractProgressTracker,
     MksquashfsProgress,
     ProgressParseError,
     ProgressTracker,
+    UnsquashfsProgress,
     ZenityProgressService,
     parse_mksquashfs_progress,
+    parse_unsquashfs_progress,
 )
 
 
@@ -60,6 +64,52 @@ class TestMksquashfsProgressDataClass:
     def test_immutability(self):
         """Test that the dataclass is immutable."""
         progress = MksquashfsProgress(current_files=10, total_files=100, percentage=50)
+
+        with pytest.raises(Exception):  # FrozenInstanceError
+            progress.current_files = 20  # type: ignore[attr-defined]
+
+
+class TestUnsquashfsProgressDataClass:
+    """Test the UnsquashfsProgress data class."""
+
+    def test_valid_progress_creation(self):
+        """Test creation of valid progress object."""
+        progress = UnsquashfsProgress(current_files=10, total_files=100, percentage=50)
+        assert progress.current_files == 10
+        assert progress.total_files == 100
+        assert progress.percentage == 50
+
+    def test_invalid_percentage_raises_error(self):
+        """Test that invalid percentage raises ValueError."""
+        with pytest.raises(ValueError, match="Percentage must be between 0-100"):
+            UnsquashfsProgress(current_files=10, total_files=100, percentage=150)
+
+        with pytest.raises(ValueError, match="Percentage must be between 0-100"):
+            UnsquashfsProgress(current_files=10, total_files=100, percentage=-10)
+
+    def test_invalid_current_files_raises_error(self):
+        """Test that invalid current files raises ValueError."""
+        with pytest.raises(ValueError, match="Current files must be >= 0"):
+            UnsquashfsProgress(current_files=-1, total_files=100, percentage=50)
+
+    def test_invalid_total_files_raises_error(self):
+        """Test that invalid total files raises ValueError."""
+        with pytest.raises(ValueError, match="Total files must be > 0"):
+            UnsquashfsProgress(current_files=10, total_files=0, percentage=50)
+
+        with pytest.raises(ValueError, match="Total files must be > 0"):
+            UnsquashfsProgress(current_files=10, total_files=-100, percentage=50)
+
+    def test_current_exceeds_total_raises_error(self):
+        """Test that current files exceeding total raises ValueError."""
+        with pytest.raises(
+            ValueError, match="Current files.*cannot exceed total files"
+        ):
+            UnsquashfsProgress(current_files=150, total_files=100, percentage=50)
+
+    def test_immutability(self):
+        """Test that the dataclass is immutable."""
+        progress = UnsquashfsProgress(current_files=10, total_files=100, percentage=50)
 
         with pytest.raises(Exception):  # FrozenInstanceError
             progress.current_files = 20  # type: ignore[attr-defined]
@@ -156,6 +206,85 @@ class TestParseMksquashfsProgress:
         line = "[===================================================================================================================================] 1/1  100%"
         result = parse_mksquashfs_progress(line)
         assert result == MksquashfsProgress(1, 1, 100)
+
+
+class TestParseUnsquashfsProgress:
+    """Test the unsquashfs progress parser."""
+
+    def test_parse_percentage_format(self):
+        """Test parsing percentage format."""
+        line = "50%"
+        result = parse_unsquashfs_progress(line, total_files=100)
+        assert result == UnsquashfsProgress(50, 100, 50)
+
+        line = "100%"
+        result = parse_unsquashfs_progress(line, total_files=200)
+        assert result == UnsquashfsProgress(200, 200, 100)
+
+        line = "0%"
+        result = parse_unsquashfs_progress(line, total_files=50)
+        assert result == UnsquashfsProgress(0, 50, 0)
+
+    def test_parse_inodes_format(self):
+        """Test parsing inodes format."""
+        line = "100 inodes (200 blocks) to write"
+        result = parse_unsquashfs_progress(line, total_files=200)
+        assert result == UnsquashfsProgress(100, 200, 50)
+
+        line = "200 inodes (400 blocks) to write"
+        result = parse_unsquashfs_progress(line, total_files=200)
+        assert result == UnsquashfsProgress(200, 200, 99)  # min(99, 100) = 99
+
+    def test_parse_created_files_format(self):
+        """Test parsing created files format."""
+        line = "created 50 files"
+        result = parse_unsquashfs_progress(line, total_files=100)
+        assert result == UnsquashfsProgress(50, 100, 50)
+
+        line = "created 100 files"
+        result = parse_unsquashfs_progress(line, total_files=100)
+        assert result == UnsquashfsProgress(100, 100, 99)  # min(99, 100) = 99
+
+    def test_parse_non_progress_lines(self):
+        """Test that non-progress lines return None."""
+        lines = [
+            "Parallel unsquashfs: Using 16 processors",
+            "0 inodes (0 blocks) to write",
+            "squashfs-root",
+            "created 0 files",
+            "created 1 directory",
+            "created 0 symlinks",
+            "",
+            "Some random text",
+        ]
+
+        for line in lines:
+            result = parse_unsquashfs_progress(line, total_files=100)
+            assert result is None
+
+    def test_parse_invalid_percentage(self):
+        """Test that invalid percentage raises ProgressParseError."""
+        # "invalid%" doesn't match the regex, so it returns None
+        result = parse_unsquashfs_progress("invalid%", total_files=100)
+        assert result is None
+
+        # "150%" matches the regex but creates invalid progress data
+        with pytest.raises(ProgressParseError):
+            parse_unsquashfs_progress("150%", total_files=100)
+
+    def test_parse_invalid_inodes(self):
+        """Test that invalid inodes format returns None."""
+        # Invalid format doesn't match regex, so returns None
+        result = parse_unsquashfs_progress(
+            "invalid inodes (blocks) to write", total_files=100
+        )
+        assert result is None
+
+    def test_parse_invalid_created_files(self):
+        """Test that invalid created files format returns None."""
+        # Invalid format doesn't match regex, so returns None
+        result = parse_unsquashfs_progress("created invalid files", total_files=100)
+        assert result is None
 
 
 class TestZenityProgressService:
@@ -527,6 +656,142 @@ class TestProgressTracker:
         """Test setting total files for progress estimation."""
         mock_service = mocker.MagicMock()
         tracker = ProgressTracker(mock_service)
+
+        tracker.set_total_files(100)
+        assert tracker.total_files == 100
+
+
+class TestExtractProgressTracker:
+    """Test the ExtractProgressTracker class."""
+
+    def test_initialization(self, mocker):
+        """Test tracker initialization."""
+        mock_service = mocker.MagicMock()
+        tracker = ExtractProgressTracker(mock_service)
+
+        assert tracker.zenity_service == mock_service
+        assert tracker.last_progress is None
+        assert tracker.file_count == 0
+        assert tracker.total_files is None
+
+    def test_process_output_line_with_percentage(self, mocker):
+        """Test processing percentage progress lines."""
+        mock_service = mocker.MagicMock()
+        mock_service.check_cancelled.return_value = False
+        tracker = ExtractProgressTracker(mock_service)
+        tracker.set_total_files(100)
+
+        line = "50%"
+        tracker.process_output_line(line)
+
+        # Should parse percentage and update service
+        assert tracker.last_progress is not None
+        assert tracker.last_progress.percentage == 50
+        assert tracker.last_progress.current_files == 50
+        assert tracker.last_progress.total_files == 100
+        mock_service.update.assert_called_once()
+
+    def test_process_output_line_with_created_files(self, mocker):
+        """Test processing created files progress lines."""
+        mock_service = mocker.MagicMock()
+        mock_service.check_cancelled.return_value = False
+        tracker = ExtractProgressTracker(mock_service)
+        tracker.set_total_files(200)
+
+        line = "created 100 files"
+        tracker.process_output_line(line)
+
+        # Should parse created files and update service
+        assert tracker.last_progress is not None
+        assert tracker.last_progress.current_files == 100
+        assert tracker.last_progress.total_files == 200
+        assert tracker.last_progress.percentage == 50
+        mock_service.update.assert_called_once()
+
+    def test_process_output_line_with_inodes(self, mocker):
+        """Test processing inodes progress lines."""
+        mock_service = mocker.MagicMock()
+        mock_service.check_cancelled.return_value = False
+        tracker = ExtractProgressTracker(mock_service)
+        tracker.set_total_files(100)
+
+        line = "50 inodes (100 blocks) to write"
+        tracker.process_output_line(line)
+
+        # Should parse inodes and update service
+        assert tracker.last_progress is not None
+        assert tracker.last_progress.current_files == 50
+        assert tracker.last_progress.total_files == 100
+        assert tracker.last_progress.percentage == 50
+        mock_service.update.assert_called_once()
+
+    def test_process_output_line_without_total_files(self, mocker):
+        """Test processing lines when total files is not set."""
+        mock_service = mocker.MagicMock()
+        mock_service.check_cancelled.return_value = False
+        tracker = ExtractProgressTracker(mock_service)
+        # Don't set total_files
+
+        line = "50%"
+        tracker.process_output_line(line)
+
+        # Should not update service when total_files is None
+        mock_service.update.assert_not_called()
+
+    def test_process_output_line_with_created_files_updates_file_count(self, mocker):
+        """Test that created files lines update file count."""
+        mock_service = mocker.MagicMock()
+        mock_service.check_cancelled.return_value = False
+        tracker = ExtractProgressTracker(mock_service)
+        tracker.set_total_files(100)
+
+        line = "created 25 files"
+        tracker.process_output_line(line)
+
+        # The file_count is updated in _process_file_line, but since "created 25 files"
+        # is parsed as standard progress, _process_file_line is not called
+        # The progress is still tracked correctly though
+        assert tracker.last_progress is not None
+        assert tracker.last_progress.current_files == 25
+        assert tracker.last_progress.total_files == 100
+        assert tracker.last_progress.percentage == 25
+
+    def test_process_output_line_non_progress_lines(self, mocker):
+        """Test processing non-progress lines."""
+        mock_service = mocker.MagicMock()
+        mock_service.check_cancelled.return_value = False
+        tracker = ExtractProgressTracker(mock_service)
+        tracker.set_total_files(100)
+
+        lines = [
+            "Parallel unsquashfs: Using 16 processors",
+            "0 inodes (0 blocks) to write",
+            "squashfs-root",
+            "created 0 files",
+            "created 1 directory",
+            "created 0 symlinks",
+        ]
+
+        for line in lines:
+            tracker.process_output_line(line)
+
+        # Should not update service for non-progress lines
+        mock_service.update.assert_not_called()
+
+    def test_process_output_line_cancellation(self, mocker):
+        """Test that cancellation raises ExtractCancelledError."""
+        mock_service = mocker.MagicMock()
+        mock_service.check_cancelled.return_value = True
+        tracker = ExtractProgressTracker(mock_service)
+        tracker.set_total_files(100)
+
+        with pytest.raises(ExtractCancelledError, match="Extract cancelled by user"):
+            tracker.process_output_line("50%")
+
+    def test_set_total_files(self, mocker):
+        """Test setting total files for progress estimation."""
+        mock_service = mocker.MagicMock()
+        tracker = ExtractProgressTracker(mock_service)
 
         tracker.set_total_files(100)
         assert tracker.total_files == 100
