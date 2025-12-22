@@ -8,6 +8,7 @@ import pytest
 
 from squish.config import SquishFSConfig
 from squish.core import SquashFSManager
+from squish.build import BuildConfiguration
 from squish.errors import DependencyError
 
 
@@ -135,20 +136,21 @@ class TestSquashFSManagerFunctionality:
             processors=4,
         )
 
-        # Verify delegation
-        mock_instance.build_squashfs.assert_called_once_with(
-            "source_dir",
-            "output.squashfs",
-            ["*.tmp", "*.log"],
-            None,
-            False,
-            False,
-            "xz",
-            "4M",
-            4,
-            False,  # progress parameter (default value)
-            None,
+        # Verify delegation - now expects BuildConfiguration object
+        expected_config = BuildConfiguration(
+            source="source_dir",
+            output="output.squashfs",
+            excludes=["*.tmp", "*.log"],
+            exclude_file=None,
+            wildcards=False,
+            regex=False,
+            compression="xz",
+            block_size="4M",
+            processors=4,
+            progress=False,
+            progress_service=None,
         )
+        mock_instance.build_squashfs.assert_called_once_with(expected_config)
 
     def test_list_squashfs_method(self, mocker):
         """Test the list_squashfs method delegates to list_manager."""

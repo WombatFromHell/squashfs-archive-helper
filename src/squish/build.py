@@ -5,9 +5,14 @@ This module contains functionality for creating SquashFS archives
 with various options and configurations.
 """
 
+import datetime
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional
+
+from dataclasses import dataclass
+from typing import Optional, List
 
 from .config import SquishFSConfig
 from .errors import (
@@ -23,6 +28,34 @@ from .progress import (
 )
 
 
+@dataclass
+class BuildConfiguration:
+    """Configuration object for SquashFS build operations."""
+    source: str
+    output: Optional[str] = None
+    excludes: Optional[List[str]] = None
+    exclude_file: Optional[str] = None
+    wildcards: bool = False
+    regex: bool = False
+    compression: str = "zstd"
+    block_size: str = "1M"
+    processors: Optional[int] = None
+    progress: bool = False
+    progress_service: Optional[ZenityProgressService] = None
+
+
+@dataclass
+class CommandConfiguration:
+    """Configuration object for mksquashfs command execution."""
+    source: str
+    output: str
+    excludes: List[str]
+    compression: str
+    block_size: str
+    processors: int
+    progress_service: Optional[ZenityProgressService] = None
+
+
 class BuildManager:
     """
     Manager for squashfs build operations.
@@ -34,6 +67,46 @@ class BuildManager:
     def __init__(self, config: Optional[SquishFSConfig] = None):
         self.config = config if config else SquishFSConfig()
         self.logger = get_logger(self.config.verbose)
+
+    def _generate_default_output_filename(self, source: str) -> str:
+        """Generate default output filename in format: archive-(YYYYMMDD)-(nn).sqsh"""
+        # Get the directory containing the source
+        source_path = Path(source)
+        if source_path.is_file():
+            # If source is a file, use its parent directory
+            target_dir = source_path.parent
+        else:
+            # If source is a directory, use its parent directory
+            target_dir = source_path.parent
+
+        # Generate date string
+        date_str = datetime.datetime.now().strftime("%Y%m%d")
+
+        # Find the next available number
+        base_name = f"archive-{date_str}"
+        extension = ".sqsh"
+
+        # Check for existing files with this pattern in the target directory
+        existing_files = []
+        for filename in os.listdir(target_dir):
+            if filename.startswith(base_name) and filename.endswith(extension):
+                try:
+                    # Extract the number part
+                    num_part = filename[
+                        len(base_name) + 1 : -len(extension)
+                    ]  # +1 for the dash
+                    existing_files.append(int(num_part))
+                except (ValueError, IndexError):
+                    # Skip files that don't match the expected pattern
+                    continue
+
+        # Find the next available number
+        next_num = 1
+        while next_num in existing_files:
+            next_num += 1
+
+        # Return the full path to the output file
+        return str(target_dir / f"{base_name}-{next_num:02d}{extension}")
 
     def _count_files_in_directory(self, directory: str) -> int:
         """Count total files in directory for progress estimation."""
@@ -111,28 +184,21 @@ class BuildManager:
             )
 
     def _execute_mksquashfs_command_with_progress(
-        self,
-        source: str,
-        output: str,
-        excludes: list[str],
-        compression: str,
-        block_size: str,
-        processors: int,
-        progress_service=None,  # For dependency injection in tests
+        self, config: CommandConfiguration
     ) -> None:
         """Execute mksquashfs command with progress tracking."""
         command = [
             "mksquashfs",
-            source,
-            output,
+            config.source,
+            config.output,
             "-comp",
-            compression,
+            config.compression,
             "-b",
-            block_size,
+            config.block_size,
             "-processors",
-            str(processors),
+            str(config.processors),
             "-info",  # Show file processing for progress estimation
-        ] + excludes
+        ] + config.excludes
 
         if self.config.verbose:
             self.logger.log_command_execution(" ".join(command))
@@ -148,15 +214,15 @@ class BuildManager:
             )
 
             # Create progress service if not provided
-            if progress_service is None:
-                progress_service = ZenityProgressService()
+            if config.progress_service is None:
+                config.progress_service = ZenityProgressService()
 
             # Count total files for progress estimation
-            total_files = self._count_files_in_directory(source)
+            total_files = self._count_files_in_directory(config.source)
 
-            progress_tracker = ProgressTracker(progress_service)
+            progress_tracker = ProgressTracker(config.progress_service)
             progress_tracker.set_total_files(total_files)
-            progress_service.start(f"Building {output}... (0/{total_files} files)")
+            config.progress_service.start(f"Building {config.output}... (0/{total_files} files)")
 
             if process.stdout:
                 for line in process.stdout:
@@ -164,11 +230,11 @@ class BuildManager:
 
                     if progress_tracker.zenity_service.check_cancelled():
                         process.terminate()
-                        progress_service.close(success=False)
+                        config.progress_service.close(success=False)
                         raise BuildCancelledError("Build cancelled by user")
 
             process.wait()
-            progress_service.close(success=True)
+            config.progress_service.close(success=True)
 
             if process.returncode != 0:
                 raise MksquashfsCommandExecutionError(
@@ -176,84 +242,81 @@ class BuildManager:
                 )
 
         except subprocess.CalledProcessError as e:
-            if progress_service:
-                progress_service.close(success=False)
+            if config.progress_service:
+                config.progress_service.close(success=False)
             raise MksquashfsCommandExecutionError(
                 "mksquashfs", e.returncode, f"Failed to create archive: {e.stderr}"
             )
 
     def build_squashfs(
-        self,
-        source: str,
-        output: str,
-        excludes: list[str] | None = None,
-        exclude_file: str | None = None,
-        wildcards: bool = False,
-        regex: bool = False,
-        compression: str = "zstd",
-        block_size: str = "1M",
-        processors: int | None = None,
-        progress: bool = False,
-        progress_service=None,  # For dependency injection in tests
+        self, config: BuildConfiguration
     ) -> None:
-        """Build a SquashFS archive with optional excludes."""
-        source_path = Path(source)
-        output_path = Path(output)
+        """Build a SquashFS archive using configuration object."""
+        source_path = Path(config.source)
+
+        # Generate default output filename if not provided
+        if config.output is None:
+            config.output = self._generate_default_output_filename(config.source)
+            if self.config.verbose:
+                self.logger.logger.info(f"Generated default output filename: {config.output}")
+
+        output_path = Path(config.output)
 
         # Validate source exists
         if not source_path.exists():
-            self.logger.logger.error(f"Source not found: {source}")
-            raise BuildError(f"Source not found: {source}")
+            self.logger.logger.error(f"Source not found: {config.source}")
+            raise BuildError(f"Source not found: {config.source}")
 
         # Validate output doesn't exist
         if output_path.exists():
-            self.logger.logger.error(f"Output exists: {output}")
-            raise BuildError(f"Output exists: {output}")
+            self.logger.logger.error(f"Output exists: {config.output}")
+            raise BuildError(f"Output exists: {config.output}")
 
         # Check build dependencies
         self._check_build_dependencies()
 
         # Determine processors if not specified
-        if processors is None:
+        if config.processors is None:
             try:
                 nproc_result = subprocess.run(
                     ["nproc"], capture_output=True, text=True, check=True
                 )
-                processors = int(nproc_result.stdout.strip())
+                config.processors = int(nproc_result.stdout.strip())
             except subprocess.CalledProcessError:
-                processors = 1  # Fallback to single processor
+                config.processors = 1  # Fallback to single processor
 
         # Build exclude arguments
         exclude_args = self._build_exclude_arguments(
-            excludes, exclude_file, wildcards, regex
+            config.excludes, config.exclude_file, config.wildcards, config.regex
         )
 
         # Execute mksquashfs command with or without progress
-        if progress:
-            self._execute_mksquashfs_command_with_progress(
-                source,
-                output,
-                exclude_args,
-                compression,
-                block_size,
-                processors,
-                progress_service,
+        if config.progress:
+            command_config = CommandConfiguration(
+                source=config.source,
+                output=config.output,
+                excludes=exclude_args,
+                compression=config.compression,
+                block_size=config.block_size,
+                processors=config.processors,
+                progress_service=config.progress_service,
             )
+            self._execute_mksquashfs_command_with_progress(command_config)
         else:
             self._execute_mksquashfs_command(
-                source,
-                output,
+                config.source,
+                config.output,
                 exclude_args,
-                compression,
-                block_size,
-                processors,
-                progress_service,
+                config.compression,
+                config.block_size,
+                config.processors,
+                config.progress_service,
             )
 
         # Generate checksum after successful build
-        self._generate_checksum(output)
+        self._generate_checksum(config.output)
 
-        self.logger.logger.info(f"Created: {output}")
+        self.logger.logger.info(f"Created: {config.output}")
 
     def _generate_checksum(self, file_path: str) -> None:
         """Generate SHA256 checksum for created archive."""

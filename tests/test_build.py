@@ -11,7 +11,7 @@ from subprocess import CalledProcessError
 
 import pytest
 
-from squish.build import BuildManager
+from squish.build import BuildManager, BuildConfiguration, CommandConfiguration
 from squish.config import SquishFSConfig
 from squish.errors import BuildError, MksquashfsCommandExecutionError
 
@@ -163,7 +163,8 @@ class TestBuildSquashFS:
 
         mock_run.side_effect = mock_run_side_effect
 
-        manager.build_squashfs(str(source), str(output))
+        config = BuildConfiguration(source=str(source), output=str(output))
+        manager.build_squashfs(config)
 
         # Verify mksquashfs was called
         assert mock_run.call_count >= 3  # nproc + mksquashfs + sha256sum
@@ -180,7 +181,8 @@ class TestBuildSquashFS:
     def test_build_squashfs_source_not_found(self, manager):
         """Test build operation with non-existent source."""
         with pytest.raises(BuildError, match="Source not found"):
-            manager.build_squashfs("/nonexistent/source", "/output.sqsh")
+            config = BuildConfiguration(source="/nonexistent/source", output="/output.sqsh")
+            manager.build_squashfs(config)
 
     def test_build_squashfs_output_exists(self, manager, build_test_files):
         """Test build operation with existing output."""
@@ -189,7 +191,60 @@ class TestBuildSquashFS:
         output.touch()  # Create existing file
 
         with pytest.raises(BuildError, match="Output exists"):
-            manager.build_squashfs(str(source), str(output))
+            config = BuildConfiguration(source=str(source), output=str(output))
+            manager.build_squashfs(config)
+
+    def test_build_squashfs_with_default_output(
+        self, mocker, manager, build_test_files
+    ):
+        """Test build operation with default output filename generation."""
+        source = build_test_files["source"]
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("squish.build.subprocess.run")
+
+        # Mock subprocess.run to return appropriate values
+        def mock_run_side_effect(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[0] == "nproc":
+                return mocker.MagicMock(stdout="4\n", returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "mksquashfs":
+                return mocker.MagicMock(returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "sha256sum":
+                # Return a mock with proper stdout for checksum
+                mock_result = mocker.MagicMock()
+                mock_result.stdout = f"d41d8cd98f00b204e9800998ecf8427e  {cmd[1]}\n"
+                mock_result.returncode = 0
+                mock_result.check = lambda: True
+                return mock_result
+            return mocker.MagicMock(returncode=0, check=lambda: True)
+
+        mock_run.side_effect = mock_run_side_effect
+
+        # Test building without specifying output
+        config = BuildConfiguration(source=str(source), output=None)
+        manager.build_squashfs(config)
+
+        # Verify mksquashfs was called with a generated filename
+        assert mock_run.call_count >= 3  # nproc + mksquashfs + sha256sum
+
+        # Check that the generated filename follows the expected pattern
+        mksquashfs_calls = [
+            call for call in mock_run.call_args_list if call.args[0][0] == "mksquashfs"
+        ]
+        assert len(mksquashfs_calls) >= 1
+
+        generated_output = mksquashfs_calls[0].args[0][
+            2
+        ]  # Third argument is the output file
+
+        # Extract just the filename from the full path
+        import os
+
+        filename = os.path.basename(generated_output)
+
+        assert filename.startswith("archive-")
+        assert filename.endswith(".sqsh")
+        assert "-" in filename
 
 
 class TestBuildCommandExecution:
@@ -273,7 +328,8 @@ class TestBuildDependencyChecking:
         output = build_test_files["tmp_path"] / "output.sqsh"
 
         # This should not raise an exception and should use 1 processor as fallback
-        manager.build_squashfs(str(source), str(output))
+        config = BuildConfiguration(source=str(source), output=str(output))
+        manager.build_squashfs(config)
 
     def test_generate_checksum_command_execution_error(self, mocker):
         """Test checksum generation command execution failure."""
@@ -374,7 +430,8 @@ class TestBuildCoverageGaps:
             output = Path(temp_dir) / "output.sqsh"
 
             # This should not raise an exception and should use 1 processor as fallback
-            manager.build_squashfs(str(source), str(output))
+            config = BuildConfiguration(source=str(source), output=str(output))
+            manager.build_squashfs(config)
 
             # Verify that nproc was called and failed, triggering the fallback
             nproc_calls = [
@@ -439,12 +496,13 @@ class TestBuildCoverageGaps:
             output = Path(temp_dir) / "output.sqsh"
 
             # Build with progress using our mocked service
-            manager.build_squashfs(
-                str(source),
-                str(output),
+            config = BuildConfiguration(
+                source=str(source),
+                output=str(output),
                 progress=True,
                 progress_service=mock_zenity_service,
             )
+            manager.build_squashfs(config)
 
             # Verify file counting was done
             assert manager._count_files_in_directory(str(source)) == 3
@@ -581,7 +639,8 @@ class TestBuildCoverageGaps:
 
             # This should not raise an exception even though Zenity is unavailable
             # The key test is that the build continues with console fallback
-            manager.build_squashfs(str(source), str(output), progress=True)
+            config = BuildConfiguration(source=str(source), output=str(output), progress=True)
+            manager.build_squashfs(config)
 
         # If we reach here, the build completed successfully with Zenity fallback
         # The main assertion is that no exception was raised
@@ -615,15 +674,16 @@ class TestBuildBranchCoverage:
             output = Path(temp_dir) / "output.sqsh"
 
             with pytest.raises(MksquashfsCommandExecutionError) as exc_info:
-                manager._execute_mksquashfs_command_with_progress(
-                    str(source),
-                    str(output),
-                    [],
-                    "zstd",
-                    "1M",
-                    1,
-                    mock_zenity_service,
+                config = CommandConfiguration(
+                    source=str(source),
+                    output=str(output),
+                    excludes=[],
+                    compression="zstd",
+                    block_size="1M",
+                    processors=1,
+                    progress_service=mock_zenity_service,
                 )
+                manager._execute_mksquashfs_command_with_progress(config)
 
             assert exc_info.value.command == "mksquashfs"
             assert exc_info.value.return_code == 1
@@ -659,15 +719,16 @@ class TestBuildBranchCoverage:
             output = Path(temp_dir) / "output.sqsh"
 
             with pytest.raises(BuildCancelledError, match="Build cancelled by user"):
-                manager._execute_mksquashfs_command_with_progress(
-                    str(source),
-                    str(output),
-                    [],
-                    "zstd",
-                    "1M",
-                    1,
-                    mock_zenity_service,
+                config = CommandConfiguration(
+                    source=str(source),
+                    output=str(output),
+                    excludes=[],
+                    compression="zstd",
+                    block_size="1M",
+                    processors=1,
+                    progress_service=mock_zenity_service,
                 )
+                manager._execute_mksquashfs_command_with_progress(config)
 
             # Verify process was terminated
             mock_process.terminate.assert_called_once()
@@ -703,7 +764,8 @@ class TestBuildBranchCoverage:
             mock_run.side_effect = build_side_effect
 
             # This should use 1 processor as fallback
-            manager.build_squashfs(str(source), str(output))
+            config = BuildConfiguration(source=str(source), output=str(output))
+            manager.build_squashfs(config)
 
             # Verify nproc was called and failed
             nproc_calls = [
@@ -765,7 +827,8 @@ class TestBuildBranchCoverage:
 
         # Test source not found
         with pytest.raises(BuildError, match="Source not found"):
-            manager.build_squashfs("/nonexistent/source", "/tmp/output.sqsh")
+            config = BuildConfiguration(source="/nonexistent/source", output="/tmp/output.sqsh")
+            manager.build_squashfs(config)
 
         # Test output exists
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -775,7 +838,8 @@ class TestBuildBranchCoverage:
             output.touch()  # Create existing file
 
             with pytest.raises(BuildError, match="Output exists"):
-                manager.build_squashfs(str(source), str(output))
+                config = BuildConfiguration(source=str(source), output=str(output))
+                manager.build_squashfs(config)
 
     def test_mksquashfs_normal_mode_error_handling(self, mocker):
         """Test error handling in normal (non-progress) mksquashfs execution."""
@@ -830,15 +894,16 @@ class TestBuildBranchCoverage:
             output = Path(temp_dir) / "output.sqsh"
 
             # This should not raise an exception due to None stdout
-            manager._execute_mksquashfs_command_with_progress(
-                str(source),
-                str(output),
-                [],
-                "zstd",
-                "1M",
-                1,
-                mock_zenity_service,
+            config = CommandConfiguration(
+                source=str(source),
+                output=str(output),
+                excludes=[],
+                compression="zstd",
+                block_size="1M",
+                processors=1,
+                progress_service=mock_zenity_service,
             )
+            manager._execute_mksquashfs_command_with_progress(config)
 
             # Verify process was waited on
             mock_process.wait.assert_called_once()
@@ -899,15 +964,16 @@ class TestBuildExceptionCoverage:
             output = Path(temp_dir) / "output.sqsh"
 
             with pytest.raises(MksquashfsCommandExecutionError) as exc_info:
-                manager._execute_mksquashfs_command_with_progress(
-                    str(source),
-                    str(output),
-                    [],
-                    "zstd",
-                    "1M",
-                    1,
-                    mock_zenity_service,
+                config = CommandConfiguration(
+                    source=str(source),
+                    output=str(output),
+                    excludes=[],
+                    compression="zstd",
+                    block_size="1M",
+                    processors=1,
+                    progress_service=mock_zenity_service,
                 )
+                manager._execute_mksquashfs_command_with_progress(config)
 
             assert exc_info.value.command == "mksquashfs"
             assert exc_info.value.return_code == 1
@@ -941,7 +1007,8 @@ class TestBuildExceptionCoverage:
             output = Path(temp_dir) / "output.sqsh"
 
             # This should use 1 processor as fallback when nproc raises CalledProcessError
-            manager.build_squashfs(str(source), str(output))
+            config = BuildConfiguration(source=str(source), output=str(output))
+            manager.build_squashfs(config)
 
             # Verify nproc was called and raised an exception
             nproc_calls = [
@@ -1021,7 +1088,8 @@ class TestBuildVerboseLoggingCoverage:
         mocker.patch.object(verbose_manager, "_generate_checksum")
 
         # Execute the build
-        verbose_manager.build_squashfs(source, output)
+        config = BuildConfiguration(source=source, output=output)
+        verbose_manager.build_squashfs(config)
 
         # Verify verbose logging was called for command execution by checking the logger
         # The logging should have happened, we can verify by checking the logger's log_command_execution was called
@@ -1059,7 +1127,8 @@ class TestBuildVerboseLoggingCoverage:
 
         # Execute the build and expect failure
         with pytest.raises(MksquashfsCommandExecutionError):
-            verbose_manager.build_squashfs(source, output)
+            config = BuildConfiguration(source=source, output=output)
+            verbose_manager.build_squashfs(config)
 
         # Verify verbose logging was called for command execution
         mock_logger.assert_called()
@@ -1136,7 +1205,8 @@ class TestBuildProgressTrackingCoverage:
         mocker.patch.object(verbose_manager, "_generate_checksum")
 
         # Execute the build with progress
-        verbose_manager.build_squashfs(source, output, progress=True)
+        config = BuildConfiguration(source=source, output=output, progress=True)
+        verbose_manager.build_squashfs(config)
 
         # Verify verbose logging was called for command execution in progress mode
         mock_logger.assert_called()
@@ -1198,7 +1268,8 @@ class TestBuildProgressTrackingCoverage:
         mock_checksum = mocker.patch.object(verbose_manager, "_generate_checksum")
 
         # Execute the build with progress and processors=None (should fallback to 1)
-        verbose_manager.build_squashfs(source, output, progress=True, processors=None)
+        config = BuildConfiguration(source=source, output=output, progress=True, processors=None)
+        verbose_manager.build_squashfs(config)
 
         # Verify that the build completed (fallback to 1 processor worked)
         mock_checksum.assert_called_once()
@@ -1245,7 +1316,8 @@ class TestBuildProgressTrackingCoverage:
 
         # Execute the build with progress - this will cover lines 270, 278-279
         # The verbose logging happens automatically in the _generate_checksum method
-        verbose_manager.build_squashfs(source, output, progress=True)
+        config = BuildConfiguration(source=source, output=output, progress=True)
+        verbose_manager.build_squashfs(config)
 
         # Verify that the build completed successfully (which means checksum generation worked)
         # The actual logging calls are tested in the existing verbose logging tests
