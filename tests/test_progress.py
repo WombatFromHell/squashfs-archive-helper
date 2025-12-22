@@ -548,7 +548,7 @@ class TestProgressTracker:
         tracker = ProgressTracker(mock_service)
 
         assert tracker.zenity_service == mock_service
-        assert tracker.last_progress is None
+        assert tracker._state.last_progress is None
 
     def test_process_output_line_with_progress(self, mocker):
         """Test processing output line with progress info."""
@@ -563,7 +563,7 @@ class TestProgressTracker:
         mock_service.update.assert_called_once()
         progress_arg = mock_service.update.call_args[0][0]
         assert progress_arg == MksquashfsProgress(10, 100, 50)
-        assert tracker.last_progress == progress_arg
+        assert tracker._state.last_progress == progress_arg
 
     def test_process_output_line_without_progress(self, mocker):
         """Test processing output line without progress info."""
@@ -576,7 +576,7 @@ class TestProgressTracker:
 
         # Should not update service
         mock_service.update.assert_not_called()
-        assert tracker.last_progress is None
+        assert tracker._state.last_progress is None
 
     def test_process_output_line_raises_cancelled_error(self, mocker):
         """Test that cancelled service raises BuildCancelledError."""
@@ -617,8 +617,8 @@ class TestProgressTracker:
         tracker.process_output_line(line)
 
         # Should update file count and send status update
-        assert tracker.file_count == 1
-        assert tracker.processed_size == 100
+        assert tracker._state.file_count == 1
+        assert tracker._state.processed_size == 100
 
         # Should call update method which writes to stdin
         mock_service.update.assert_called_once()
@@ -644,11 +644,11 @@ class TestProgressTracker:
         tracker.process_output_line(line1)
 
         # Should create mock progress and update service
-        assert tracker.file_count == 1
-        assert tracker.last_progress is not None
-        assert tracker.last_progress.current_files == 1
-        assert tracker.last_progress.total_files == 2
-        assert tracker.last_progress.percentage == 50
+        assert tracker._state.file_count == 1
+        assert tracker._state.last_progress is not None
+        assert tracker._state.last_progress.current_files == 1
+        assert tracker._state.last_progress.total_files == 2
+        assert tracker._state.last_progress.percentage == 50
 
         mock_service.update.assert_called_once()
 
@@ -658,7 +658,7 @@ class TestProgressTracker:
         tracker = ProgressTracker(mock_service)
 
         tracker.set_total_files(100)
-        assert tracker.total_files == 100
+        assert tracker._state.total_files == 100
 
 
 class TestExtractProgressTracker:
@@ -670,9 +670,9 @@ class TestExtractProgressTracker:
         tracker = ExtractProgressTracker(mock_service)
 
         assert tracker.zenity_service == mock_service
-        assert tracker.last_progress is None
-        assert tracker.file_count == 0
-        assert tracker.total_files is None
+        assert tracker._state.last_progress is None
+        assert tracker._state.file_count == 0
+        assert tracker._state.total_files is None
 
     def test_process_output_line_with_percentage(self, mocker):
         """Test processing percentage progress lines."""
@@ -685,10 +685,10 @@ class TestExtractProgressTracker:
         tracker.process_output_line(line)
 
         # Should parse percentage and update service
-        assert tracker.last_progress is not None
-        assert tracker.last_progress.percentage == 50
-        assert tracker.last_progress.current_files == 50
-        assert tracker.last_progress.total_files == 100
+        assert tracker._state.last_progress is not None
+        assert tracker._state.last_progress.percentage == 50
+        assert tracker._state.last_progress.current_files == 50
+        assert tracker._state.last_progress.total_files == 100
         mock_service.update.assert_called_once()
 
     def test_process_output_line_with_created_files(self, mocker):
@@ -702,10 +702,10 @@ class TestExtractProgressTracker:
         tracker.process_output_line(line)
 
         # Should parse created files and update service
-        assert tracker.last_progress is not None
-        assert tracker.last_progress.current_files == 100
-        assert tracker.last_progress.total_files == 200
-        assert tracker.last_progress.percentage == 50
+        assert tracker._state.last_progress is not None
+        assert tracker._state.last_progress.current_files == 100
+        assert tracker._state.last_progress.total_files == 200
+        assert tracker._state.last_progress.percentage == 50
         mock_service.update.assert_called_once()
 
     def test_process_output_line_with_inodes(self, mocker):
@@ -719,10 +719,10 @@ class TestExtractProgressTracker:
         tracker.process_output_line(line)
 
         # Should parse inodes and update service
-        assert tracker.last_progress is not None
-        assert tracker.last_progress.current_files == 50
-        assert tracker.last_progress.total_files == 100
-        assert tracker.last_progress.percentage == 50
+        assert tracker._state.last_progress is not None
+        assert tracker._state.last_progress.current_files == 50
+        assert tracker._state.last_progress.total_files == 100
+        assert tracker._state.last_progress.percentage == 50
         mock_service.update.assert_called_once()
 
     def test_process_output_line_without_total_files(self, mocker):
@@ -751,10 +751,10 @@ class TestExtractProgressTracker:
         # The file_count is updated in _process_file_line, but since "created 25 files"
         # is parsed as standard progress, _process_file_line is not called
         # The progress is still tracked correctly though
-        assert tracker.last_progress is not None
-        assert tracker.last_progress.current_files == 25
-        assert tracker.last_progress.total_files == 100
-        assert tracker.last_progress.percentage == 25
+        assert tracker._state.last_progress is not None
+        assert tracker._state.last_progress.current_files == 25
+        assert tracker._state.last_progress.total_files == 100
+        assert tracker._state.last_progress.percentage == 25
 
     def test_process_output_line_non_progress_lines(self, mocker):
         """Test processing non-progress lines."""
@@ -794,7 +794,7 @@ class TestExtractProgressTracker:
         tracker = ExtractProgressTracker(mock_service)
 
         tracker.set_total_files(100)
-        assert tracker.total_files == 100
+        assert tracker._state.total_files == 100
 
 
 class TestIntegrationScenarios:
@@ -837,7 +837,7 @@ class TestIntegrationScenarios:
 
         # Verify last progress was stored
         expected_final = MksquashfsProgress(100, 100, 100)
-        assert tracker.last_progress == expected_final
+        assert tracker._state.last_progress == expected_final
 
         # Close the service
         service.close(success=True)
@@ -920,7 +920,7 @@ class TestIntegrationScenarios:
 
         # Verify last progress was stored
         expected_final = MksquashfsProgress(100, 100, 100)
-        assert tracker.last_progress == expected_final
+        assert tracker._state.last_progress == expected_final
 
         # Close the service
         with caplog.at_level(logging.INFO):

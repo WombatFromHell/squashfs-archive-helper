@@ -74,8 +74,8 @@ class TestArgumentParsing:
         mocker.patch("sys.argv", ["squish", "build", "source_dir", "output.sqsh"])
         args = parse_args()
         assert args.command == "build"
-        assert args.source == "source_dir"
-        assert args.output == "output.sqsh"
+        assert args.sources == ["source_dir", "output.sqsh"]
+        assert args.output is None
         assert args.compression == "zstd"
         assert args.block_size == "1M"
         assert args.processors is None
@@ -104,8 +104,8 @@ class TestArgumentParsing:
         )
         args = parse_args()
         assert args.command == "build"
-        assert args.source == "source_dir"
-        assert args.output == "output.sqsh"
+        assert args.sources == ["source_dir", "output.sqsh"]
+        assert args.output is None
         assert args.exclude == ["*.tmp"]
         assert args.exclude_file == "exclude.txt"
         assert args.wildcards is True
@@ -113,6 +113,64 @@ class TestArgumentParsing:
         assert args.compression == "gzip"
         assert args.block_size == "256K"
         assert args.processors == 4
+
+    def test_parse_build_without_output(self, mocker):
+        """Test parsing build command without output filename."""
+        mocker.patch(
+            "sys.argv",
+            [
+                "squish",
+                "build",
+                "source_dir",
+            ],
+        )
+        args = parse_args()
+        assert args.command == "build"
+        assert args.sources == ["source_dir"]
+        assert args.output is None
+        assert args.compression == "zstd"
+        assert args.block_size == "1M"
+        assert args.processors is None
+
+    def test_parse_build_with_explicit_output(self, mocker):
+        """Test parsing build command with explicit output filename."""
+        mocker.patch(
+            "sys.argv",
+            [
+                "squish",
+                "build",
+                "source_dir",
+                "-o",
+                "output.sqsh",
+            ],
+        )
+        args = parse_args()
+        assert args.command == "build"
+        assert args.sources == ["source_dir"]
+        assert args.output == "output.sqsh"
+        assert args.compression == "zstd"
+        assert args.block_size == "1M"
+        assert args.processors is None
+
+    def test_parse_build_multiple_sources(self, mocker):
+        """Test parsing build command with multiple sources."""
+        mocker.patch(
+            "sys.argv",
+            [
+                "squish",
+                "build",
+                "source_dir1",
+                "source_dir2",
+                "output.sqsh",
+            ],
+        )
+        args = parse_args()
+        assert args.command == "build"
+        assert args.sources == ["source_dir1", "source_dir2", "output.sqsh"]
+        assert args.output is None  # Will be auto-detected
+        assert args.compression == "zstd"
+        assert args.block_size == "1M"
+        assert args.processors is None
 
     def test_parse_list_args(self, mocker):
         """Test parsing list command arguments."""
@@ -148,8 +206,8 @@ class TestArgumentParsing:
         mocker.patch("sys.argv", ["squish", "b", "source", "output.sqsh"])
         args = parse_args()
         assert args.command == "b"
-        assert args.source == "source"
-        assert args.output == "output.sqsh"
+        assert args.sources == ["source", "output.sqsh"]
+        assert args.output is None
 
     def test_parse_mount_prefix_abbreviations(self, mocker):
         """Test parsing mount command - only single-letter alias 'm' is supported at argparse level."""
@@ -437,12 +495,18 @@ class TestCLIHandlers:
 
     def test_handle_build_operation_success(self, mock_manager):
         """Test successful build operation handling."""
+        from squish.build import BuildConfiguration
         from squish.cli import handle_build_operation
+
+        # Mock the build_manager attribute
+        mock_manager.build_manager = (
+            mock_manager  # Reuse the same mock for build_manager
+        )
 
         # Should not raise an exception
         handle_build_operation(
             mock_manager,
-            "source_dir",
+            ["source_dir"],
             "output.sqsh",
             excludes=["*.tmp"],
             exclude_file="exclude.txt",
@@ -453,18 +517,29 @@ class TestCLIHandlers:
             processors=4,
         )
 
-        mock_manager.build_squashfs.assert_called_once()
+        # Verify that build_manager.build_squashfs was called with BuildConfiguration
+        mock_manager.build_manager.build_squashfs.assert_called_once()
+        call_args = mock_manager.build_manager.build_squashfs.call_args[0][0]
+        assert isinstance(call_args, BuildConfiguration)
+        assert call_args.source == "source_dir"
+        assert call_args.output == "output.sqsh"
 
     def test_handle_build_operation_failure(self, mock_manager):
         """Test failed build operation handling."""
         from squish.cli import handle_build_operation
 
-        mock_manager.build_squashfs.side_effect = BuildError("Build failed")
+        # Mock the build_manager attribute
+        mock_manager.build_manager = (
+            mock_manager  # Reuse the same mock for build_manager
+        )
+        mock_manager.build_manager.build_squashfs.side_effect = BuildError(
+            "Build failed"
+        )
 
         with pytest.raises(SystemExit):
             handle_build_operation(
                 mock_manager,
-                "source_dir",
+                ["source_dir"],
                 "output.sqsh",
                 excludes=["*.tmp"],
                 exclude_file="exclude.txt",
@@ -479,13 +554,19 @@ class TestCLIHandlers:
         """Test failed build operation handling when logger is None (prints error message)."""
         from squish.cli import handle_build_operation
 
-        mock_manager.build_squashfs.side_effect = BuildError("Build failed")
+        # Mock the build_manager attribute
+        mock_manager.build_manager = (
+            mock_manager  # Reuse the same mock for build_manager
+        )
+        mock_manager.build_manager.build_squashfs.side_effect = BuildError(
+            "Build failed"
+        )
 
         mock_print = mocker.patch("builtins.print")
         with pytest.raises(SystemExit):
             handle_build_operation(
                 mock_manager,
-                "source_dir",
+                ["source_dir"],
                 "output.sqsh",
                 excludes=["*.tmp"],
                 exclude_file="exclude.txt",
@@ -586,6 +667,7 @@ class TestMainFunction:
 
         # Mock manager
         mock_manager = mocker.MagicMock()
+        mock_manager.build_manager = mocker.MagicMock()  # Mock build_manager
         mock_manager_class.return_value = mock_manager
 
         # Should not raise an exception
@@ -593,7 +675,7 @@ class TestMainFunction:
 
         # Verify manager was created and build was called
         mock_manager_class.assert_called_once()
-        mock_manager.build_squashfs.assert_called_once()
+        mock_manager.build_manager.build_squashfs.assert_called_once()
 
     def test_main_unmount_command(self, mocker):
         """Test main function with unmount command."""
@@ -1435,7 +1517,15 @@ class TestCLICoverageGaps:
         error_class = getattr(errors_module, error_type)
 
         mock_manager = mocker.MagicMock()
-        getattr(mock_manager, method_name).side_effect = error_class(error_message)
+
+        # Special handling for build operation which now uses build_manager
+        if method_name == "build_squashfs":
+            mock_manager.build_manager = mocker.MagicMock()
+            mock_manager.build_manager.build_squashfs.side_effect = error_class(
+                error_message
+            )
+        else:
+            getattr(mock_manager, method_name).side_effect = error_class(error_message)
 
         mock_print = mocker.patch("builtins.print")
         mock_exit = mocker.patch("sys.exit")
@@ -1605,10 +1695,13 @@ class TestCLICoverageGaps:
         mock_exit.assert_called_once_with(1)
 
         # Test handle_build_operation without logger (line 202)
-        mock_manager.build_squashfs.side_effect = BuildError("Build failed")
+        mock_manager.build_manager = mocker.MagicMock()
+        mock_manager.build_manager.build_squashfs.side_effect = BuildError(
+            "Build failed"
+        )
         mock_print = mocker.patch("builtins.print")
         mock_exit = mocker.patch("sys.exit")
-        handle_build_operation(mock_manager, "source_dir", "output.sqs", logger=None)
+        handle_build_operation(mock_manager, ["source_dir"], "output.sqs", logger=None)
         mock_print.assert_called_once_with("Build failed: Build failed")
         mock_exit.assert_called_once_with(1)
 
@@ -1730,10 +1823,13 @@ class TestCLICoverageGaps:
         mock_exit.assert_called_once_with(1)
 
         # Test handle_build_operation without logger (line 202)
-        mock_manager.build_squashfs.side_effect = BuildError("Build failed")
+        mock_manager.build_manager = mocker.MagicMock()
+        mock_manager.build_manager.build_squashfs.side_effect = BuildError(
+            "Build failed"
+        )
         mock_print = mocker.patch("builtins.print")
         mock_exit = mocker.patch("sys.exit")
-        handle_build_operation(mock_manager, "source_dir", "output.sqs", logger=None)
+        handle_build_operation(mock_manager, ["source_dir"], "output.sqs", logger=None)
         mock_print.assert_called_once_with("Build failed: Build failed")
         mock_exit.assert_called_once_with(1)
 
@@ -1875,10 +1971,13 @@ class TestCLICoverageGaps:
 
         # Test handle_build_operation with logger (lines 205-207)
         mock_logger.logger = mocker.MagicMock()
-        mock_manager.build_squashfs.side_effect = BuildError("Build failed")
+        mock_manager.build_manager = mocker.MagicMock()
+        mock_manager.build_manager.build_squashfs.side_effect = BuildError(
+            "Build failed"
+        )
         mock_exit = mocker.patch("sys.exit")
         handle_build_operation(
-            mock_manager, "source_dir", "output.sqs", logger=mock_logger
+            mock_manager, ["source_dir"], "output.sqs", logger=mock_logger
         )
         mock_logger.logger.error.assert_called_once_with("Build failed: Build failed")
         mock_exit.assert_called_once_with(1)

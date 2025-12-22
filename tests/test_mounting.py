@@ -309,7 +309,7 @@ class TestCleanupErrors:
             (mount_point / "stubborn_file").touch()
 
             # Enable verbose to see the warning
-            manager.config.verbose = True
+            object.__setattr__(manager.config, "verbose", True)
 
             # This should not raise an exception, just print a warning
             # Mock shutil.rmtree to raise an error only during the cleanup call
@@ -436,7 +436,7 @@ class TestMountingCoverageGaps:
             mount_point.mkdir()
 
             # Enable auto_cleanup to trigger the cleanup
-            manager.config.auto_cleanup = True
+            object.__setattr__(manager.config, "auto_cleanup", True)
 
             # Mock shutil.rmtree to raise an OSError only for specific path
             original_rmtree = shutil.rmtree

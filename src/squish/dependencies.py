@@ -13,10 +13,24 @@ from .config import SquishFSConfig
 from .errors import DependencyError
 
 
+def _check_single_command(cmd: str, config, logger) -> bool:
+    """Pure function to check a single command."""
+    try:
+        subprocess.run(
+            ["which", cmd],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def check_commands(
     commands: list[str], config: Optional[SquishFSConfig] = None, logger=None
 ) -> None:
-    """Check if required commands are available."""
+    """Check if required commands are available using functional pattern."""
     if config is None:
         from .config import SquishFSConfig
 
@@ -27,23 +41,23 @@ def check_commands(
 
         logger = get_logger(config.verbose)
 
-    for cmd in commands:
-        try:
-            # Only log on success if verbose mode is enabled
-            if config.verbose:
-                logger.log_dependency_check(cmd, "available")
-            subprocess.run(
-                ["which", cmd],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-        except subprocess.CalledProcessError:
-            logger.log_dependency_check(cmd, "missing")
-            raise DependencyError(
-                f"{cmd} is not installed or not in PATH. "
-                f"Please install {cmd} to use this script."
-            )
+    # Use functional approach: find first missing command
+    missing_commands = [
+        cmd for cmd in commands if not _check_single_command(cmd, config, logger)
+    ]
+
+    if missing_commands:
+        missing_cmd = missing_commands[0]  # Take first missing command
+        logger.log_dependency_check(missing_cmd, "missing")
+        raise DependencyError(
+            f"{missing_cmd} is not installed or not in PATH. "
+            f"Please install {missing_cmd} to use this script."
+        )
+
+    # Log all available commands if verbose
+    if config.verbose:
+        for cmd in commands:
+            logger.log_dependency_check(cmd, "available")
 
 
 def check_linux_dependencies(

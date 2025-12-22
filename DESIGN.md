@@ -62,7 +62,10 @@ classDiagram
 
     class Progress {
         +ProgressTracker()
+        +ExtractProgressTracker()
         +ZenityProgressService()
+        +ProgressState
+        +ExtractProgressState
     }
 
     class Config {
@@ -122,8 +125,8 @@ squish unmount <file> [mount_point]      # or: squish um <file> [mount_point]
 # Checksum
 squish check <file>                      # or: squish c <file>
 
-# Build
-squish build [options] <source> <output> # or: squish b [options] <source> <output>
+# Build (Enhanced with Multiple Sources and Auto-Naming)
+squish build [options] <sources>... [-o <output>]  # or: squish b [options] <sources>... [-o <output>]
 
 # List
 squish ls <archive>                     # or: squish l <archive>
@@ -139,6 +142,7 @@ squish extract <archive> [-o <output>]   # or: squish ex <archive> [-o <output>]
 | build   | `-P, --progress`    | Zenity progress dialog (console fallback) |
 | build   | `-c, --compression` | Compression algorithm (default: zstd)     |
 | build   | `-e, --exclude`     | Exclude patterns                          |
+| build   | `-o, --output`      | Output archive file (auto-detected)       |
 | extract | `-P, --progress`    | Zenity progress dialog (console fallback) |
 | extract | `-o, --output`      | Output directory (default: current)       |
 
@@ -151,7 +155,7 @@ squish extract <archive> [-o <output>]   # or: squish ex <archive> [-o <output>]
 - Configurable auto-cleanup
 - Dependency validation (squashfuse, fusermount)
 
-### Build
+### Build (Enhanced)
 
 - Multiple compression algorithms (zstd, gzip, xz)
 - Exclusion patterns (patterns, wildcards, regex)
@@ -159,6 +163,10 @@ squish extract <archive> [-o <output>]   # or: squish ex <archive> [-o <output>]
 - Automatic checksum generation (SHA256)
 - Real-time progress tracking with Zenity/console
 - Cancel button support
+- **Source-based automatic filename generation**
+- **Multiple sources support with automatic combination**
+- **Smart output detection from command arguments**
+- **Fallback to original archive naming pattern**
 
 ### Extract
 
@@ -176,7 +184,30 @@ classDiagram
 
     class ProgressTracker {
         +process_output_line()
+        +set_total_files()
+        -_update_with_progress()
+        -_process_file_line_functional()
+    }
+
+    class ExtractProgressTracker {
+        +process_output_line()
+        +set_total_files()
+        -_update_with_progress()
+        -_process_file_line_functional()
+    }
+
+    class ProgressState {
         +last_progress
+        +file_count
+        +total_files
+        +total_size
+        +processed_size
+    }
+
+    class ExtractProgressState {
+        +last_progress
+        +file_count
+        +total_files
     }
 
     class ZenityProgressService {
@@ -205,6 +236,10 @@ classDiagram
 
     ProgressTracker --> ZenityProgressService : Uses
     ProgressTracker --> ProgressParser : Uses
+    ProgressTracker --> ProgressState : Manages
+    ExtractProgressTracker --> ZenityProgressService : Uses
+    ExtractProgressTracker --> ProgressParser : Uses
+    ExtractProgressTracker --> ExtractProgressState : Manages
     ProgressParser --> MksquashfsProgress : Creates
     ProgressParser --> UnsquashfsProgress : Creates
 ```
@@ -232,9 +267,7 @@ classDiagram
     SquashFSError <|-- MountError
     SquashFSError <|-- UnmountError
     SquashFSError <|-- BuildError
-    SquashFSError <|-- BuildCancelledError
     SquashFSError <|-- ExtractError
-    SquashFSError <|-- ExtractCancelledError
     SquashFSError <|-- ChecksumError
     SquashFSError <|-- ListError
     SquashFSError <|-- ConfigError
@@ -246,6 +279,14 @@ classDiagram
     CommandExecutionError <|-- MksquashfsCommandExecutionError
     CommandExecutionError <|-- UnsquashfsCommandExecutionError
     CommandExecutionError <|-- UnsquashfsExtractCommandExecutionError
+
+    class BuildCancelledError {
+        <<Exception>>
+    }
+
+    class ExtractCancelledError {
+        <<Exception>>
+    }
 ```
 
 ## Testing
@@ -323,6 +364,77 @@ processors: "auto" # Default processor count
 xattr_mode: "user-only" # Xattr extraction mode (all/user-only/none)
 ```
 
+## Enhanced Build Functionality
+
+### Source-Based Filename Generation
+
+The build system now automatically generates output filenames based on the source name:
+
+**Algorithm:**
+
+1. For directories: Use directory name + `.sqsh` extension
+2. For files: Remove all extensions and add `.sqsh` extension
+3. If output file already exists, fall back to `archive-YYYYMMDD-nn.sqsh` pattern
+
+**Examples:**
+
+- Directory `MyProject` → `MyProject.sqsh`
+- File `MyArchive.tar.gz` → `MyArchive.sqsh`
+- File `data.backup.2023.tar.xz` → `data.backup.sqsh`
+
+### Multiple Sources Support
+
+The build command now accepts multiple source arguments:
+
+**Command Structure:**
+
+```bash
+squish build [options] <source1> <source2>... <output.sqsh>
+squish build [options] <source1> <source2>... -o <output.sqsh>
+```
+
+**Automatic Output Detection:**
+
+- If last argument ends with `.sqsh`, `.sqs`, or `.squashfs`, it's treated as output
+- For single sources: Use source-based naming (e.g., `MyProject.sqsh`)
+- For multiple sources with no output: Use generic naming pattern `archive-YYYYMMDD-nn.sqsh`
+- Explicit `-o` flag always takes precedence
+
+**Multiple Sources Processing:**
+
+1. **Direct mksquashfs Integration**: Pass multiple source arguments directly to `mksquashfs`
+2. **No Temporary Copying**: Eliminates disk quota issues by avoiding intermediate file copying
+3. **Efficient Resource Usage**: Uses native `mksquashfs` multiple source support
+4. **Automatic Output Naming**: Generates `archive-YYYYMMDD-nn.sqsh` pattern for multiple sources without specified output
+
+### Usage Examples
+
+**Single Source with Auto-Naming:**
+
+```bash
+# Directory source
+squish build ./MyProject
+# Creates: ./MyProject.sqsh
+
+# File source
+squish build ./archive.tar.gz
+# Creates: ./archive.sqsh
+```
+
+**Multiple Sources:**
+
+```bash
+# Auto-detected output
+squish build ./source1 ./source2 ./output.sqsh
+
+# Explicit output
+squish build ./source1 ./source2 -o ./output.sqsh
+
+# Generic naming for multiple sources (no output specified)
+squish build ./Altheia ./Neyyah
+# Creates: ./archive-YYYYMMDD-nn.sqsh (e.g., archive-20251222-01.sqsh)
+```
+
 ## Conclusion
 
 Squish provides a comprehensive, modular SquashFS management solution with:
@@ -334,5 +446,8 @@ Squish provides a comprehensive, modular SquashFS management solution with:
 - ✅ Real-time progress tracking with cancel support
 - ✅ Archive extraction with automatic directory creation
 - ✅ Zenity integration with graceful console fallback
+- ✅ **Enhanced build with source-based naming and multiple sources**
+- ✅ **Efficient multiple source handling without disk quota issues**
+- ✅ **Direct mksquashfs integration for optimal performance**
 
 The system is designed for maintainability, extensibility, and reliability.

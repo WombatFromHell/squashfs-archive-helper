@@ -1,14 +1,9 @@
 [project]
 name = "squish"
-description = "SquashFS archive management tool - build, mount, unmount, and list SquashFS archives"
-version = "1.1.0"
+description = "SquashFS archive management tool for working with SquashFS archives"
+version = "1.2.0"
 requires-python = ">=3.13"
-dependencies = [
-  "pytest>=9.0.2",
-  "pytest-cov>=7.0.0",
-  "pytest-mock>=3.15.1",
-  "radon>=6.0.1",
-]
+
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -30,4 +25,12 @@ markers = [
   "requires_zenity: marks tests that require Zenity for GUI features",
   "requires_sudo: marks tests that require sudo privileges",
   "network: marks tests that require network access",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=9.0.2",
+  "pytest-cov>=7.0.0",
+  "pytest-mock>=3.15.1",
+  "radon>=6.0.1",
 ]

@@ -6,9 +6,9 @@ This module tests the core functionality of the SquashFSManager class.
 
 import pytest
 
+from squish.build import BuildConfiguration
 from squish.config import SquishFSConfig
 from squish.core import SquashFSManager
-from squish.build import BuildConfiguration
 from squish.errors import DependencyError
 
 

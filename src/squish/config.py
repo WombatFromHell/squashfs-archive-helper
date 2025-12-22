@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Optional
 
 
-@dataclass
+@dataclass(frozen=True)
 class SquishFSConfig:
     """
-    Configuration for the SquashFS management system.
+    Immutable configuration for the SquashFS management system.
 
     Attributes:
         mount_base: Base directory name for mount points (default: "mounts")
@@ -25,6 +25,7 @@ class SquishFSConfig:
         block_size: Default block size for build operations (default: "1M")
         processors: Default number of processors for build operations (default: None for auto)
         xattr_mode: Xattr handling mode for extract operations (auto-detected based on user privileges)
+        exclude: Optional list of exclusion patterns for build operations
     """
 
     mount_base: str = "mounts"
@@ -35,9 +36,14 @@ class SquishFSConfig:
     block_size: str = "1M"
     processors: Optional[int] = None
     xattr_mode: Optional[str] = None  # Will be auto-detected in __post_init__
+    exclude: Optional[list[str]] = None
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
+        # Note: This method can still modify the object during initialization
+        # even though the class is frozen, because __post_init__ runs before
+        # the object is actually frozen.
+
         if not self.mount_base:
             raise ValueError("mount_base cannot be empty")
 
@@ -48,10 +54,10 @@ class SquishFSConfig:
         if self.xattr_mode is None:
             if is_root_user():
                 # Root users can handle all xattrs including security.selinux
-                self.xattr_mode = "all"
+                object.__setattr__(self, "xattr_mode", "all")
             else:
                 # Non-root users should avoid system xattrs to prevent permission errors
-                self.xattr_mode = "user-only"
+                object.__setattr__(self, "xattr_mode", "user-only")
 
         # Validate xattr_mode
         valid_xattr_modes = ["all", "user-only", "none"]

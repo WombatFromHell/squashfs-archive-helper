@@ -1554,19 +1554,36 @@ class TestExtractXattrFlagsMethod:
         flags = manager._get_xattr_flags()
         assert flags == ["-no-xattrs"]
 
-    def test_get_xattr_flags_unknown_mode_fallback(self):
+    def test_get_xattr_flags_unknown_mode_fallback(self, mocker):
         """Test _get_xattr_flags() with unknown mode (should fallback to user-only)."""
         from squish.config import SquishFSConfig
 
-        # Temporarily patch the config to have an invalid mode
+        # Create config with valid mode first
         config = SquishFSConfig(xattr_mode="all")
         manager = ExtractManager(config)
 
-        # Manually set an invalid mode to test the fallback
-        manager.config.xattr_mode = "invalid_mode"
-        flags = manager._get_xattr_flags()
-        # Should fallback to user-only
-        assert flags == ["-xattrs-include", "^user."]
+        # Test the fallback behavior by directly calling with an invalid mode
+        # We'll monkey patch the config.xattr_mode property
+        original_config = manager.config
+        try:
+            # Use a different approach - test the method logic directly
+            # Since we can't modify the frozen dataclass, we'll test the fallback
+            # by checking the method handles unknown modes correctly
+
+            # Create a mock config object that returns invalid mode
+            mock_config = mocker.MagicMock()
+            mock_config.xattr_mode = "invalid_mode"
+
+            # Temporarily replace the config
+            manager.config = mock_config
+
+            flags = manager._get_xattr_flags()
+            # Should fallback to user-only
+            assert flags == ["-xattrs-include", "^user."]
+
+        finally:
+            # Restore original config
+            manager.config = original_config
 
 
 class TestExtractProgressParsingFix:

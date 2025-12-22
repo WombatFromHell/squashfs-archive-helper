@@ -81,7 +81,7 @@ PERCENTAGE_PATTERN = re.compile(r"^\s*(\d+)/(\d+)\s+(\d+)%\s*$")
 
 # Pattern for parsing file processing output (used for progress estimation)
 FILE_PATTERN = re.compile(
-    r"^\s*file\s+\S+\s*,\s*uncompressed\s+size\s+(\d+)\s+bytes\s*$"
+    r"^\s*file\s+(.+?)\s*,\s*uncompressed\s+size\s+(\d+)\s+bytes\s*$"
 )
 
 # Regex patterns for parsing unsquashfs progress output
@@ -349,135 +349,218 @@ class ZenityProgressService:
             self.process = None
 
 
+@dataclass(frozen=True)
+class ProgressState:
+    """Immutable progress state."""
+
+    last_progress: Optional[MksquashfsProgress] = None
+    file_count: int = 0
+    total_files: Optional[int] = None
+    total_size: int = 0
+    processed_size: int = 0
+
+
 class ProgressTracker:
     """
-    Track progress state and handle mksquashfs output parsing.
+    Functional progress tracker with immutable state.
 
     This class manages the state of the build progress and
-    coordinates between the parser and Zenity service.
+    coordinates between the parser and Zenity service using
+    functional patterns.
     """
 
     def __init__(self, zenity_service: ZenityProgressService):
         self.zenity_service = zenity_service
-        self.last_progress = None
-        self.file_count = 0
-        self.total_files = None
-        self.total_size = 0
-        self.processed_size = 0
+        self._state = ProgressState()
 
     def process_output_line(self, line: str):
-        """Process a line of mksquashfs output."""
+        """Process a line of mksquashfs output with functional state updates."""
         # First try to parse standard progress output
         progress = parse_mksquashfs_progress(line)
         if progress:
-            self.last_progress = progress
+            new_state = self._update_with_progress(progress)
+            self._state = new_state
             self.zenity_service.update(progress)
             return
 
         # If no standard progress, try file-based progress estimation
-        self._process_file_line(line)
+        new_state = self._process_file_line_functional(line)
+        if new_state != self._state:
+            self._state = new_state
 
         if self.zenity_service.check_cancelled():
             raise BuildCancelledError("Build cancelled by user")
 
-    def _process_file_line(self, line: str):
-        """Process file processing lines for progress estimation."""
+    def _update_with_progress(self, progress: MksquashfsProgress) -> ProgressState:
+        """Pure function to update state with progress."""
+        return ProgressState(
+            last_progress=progress,
+            file_count=self._state.file_count,
+            total_files=self._state.total_files,
+            total_size=self._state.total_size,
+            processed_size=self._state.processed_size,
+        )
+
+    def _process_file_line_functional(self, line: str) -> ProgressState:
+        """Pure function to process file lines and return new state."""
         # Check if this is a file processing line
         file_match = FILE_PATTERN.match(line)
-        if file_match:
-            self.file_count += 1
-            file_size = int(file_match.group(1))
-            self.processed_size += file_size
+        if not file_match:
+            return self._state
 
-            # Estimate progress based on file count if we don't have total files yet
-            if self.total_files is None or self.total_files == 0:
-                # We can't estimate progress yet, but we can update status
-                status_text = f"Processing files: {self.file_count} files processed"
-                if self.zenity_service.process and self.zenity_service.process.stdin:
-                    # Send a status update without changing percentage
-                    self.zenity_service.process.stdin.write(f"# {status_text}\n")
-                    self.zenity_service.process.stdin.flush()
-            else:
-                # Estimate progress based on file count
-                percentage = min(99, int((self.file_count / self.total_files) * 100))
+        file_count = self._state.file_count + 1
+        file_size = int(file_match.group(2))
+        processed_size = self._state.processed_size + file_size
 
-                # Create a mock progress object
-                mock_progress = MksquashfsProgress(
-                    current_files=self.file_count,
-                    total_files=self.total_files,
-                    percentage=percentage,
-                )
-                self.last_progress = mock_progress
-                self.zenity_service.update(mock_progress)
+        # Estimate progress based on file count if we have total files
+        if self._state.total_files is not None and self._state.total_files > 0:
+            percentage = min(99, int((file_count / self._state.total_files) * 100))
+            mock_progress = MksquashfsProgress(
+                current_files=file_count,
+                total_files=self._state.total_files,
+                percentage=percentage,
+            )
+
+            # Update Zenity service with new progress
+            self.zenity_service.update(mock_progress)
+
+            return ProgressState(
+                last_progress=mock_progress,
+                file_count=file_count,
+                total_files=self._state.total_files,
+                total_size=self._state.total_size,
+                processed_size=processed_size,
+            )
+        else:
+            # We can't estimate progress yet, but we can update status
+            status_text = f"Processing files: {file_count} files processed"
+            if self.zenity_service.process and self.zenity_service.process.stdin:
+                # Send a status update without changing percentage
+                self.zenity_service.process.stdin.write(f"# {status_text}\n")
+                self.zenity_service.process.stdin.flush()
+
+            return ProgressState(
+                last_progress=self._state.last_progress,
+                file_count=file_count,
+                total_files=self._state.total_files,
+                total_size=self._state.total_size,
+                processed_size=processed_size,
+            )
 
     def set_total_files(self, total_files: int):
-        """Set the total number of files for progress estimation."""
-        self.total_files = total_files
+        """Functional update of total files."""
+        self._state = ProgressState(
+            last_progress=self._state.last_progress,
+            file_count=self._state.file_count,
+            total_files=total_files,
+            total_size=self._state.total_size,
+            processed_size=self._state.processed_size,
+        )
+
+
+@dataclass(frozen=True)
+class ExtractProgressState:
+    """Immutable extract progress state."""
+
+    last_progress: Optional[UnsquashfsProgress] = None
+    file_count: int = 0
+    total_files: Optional[int] = None
 
 
 class ExtractProgressTracker:
     """
-    Track progress state and handle unsquashfs output parsing.
+    Functional extract progress tracker with immutable state.
 
     This class manages the state of the extract progress and
-    coordinates between the parser and Zenity service.
+    coordinates between the parser and Zenity service using
+    functional patterns.
     """
 
     def __init__(self, zenity_service: ZenityProgressService):
         self.zenity_service = zenity_service
-        self.last_progress = None
-        self.file_count = 0
-        self.total_files = None
+        self._state = ExtractProgressState()
 
     def process_output_line(self, line: str):
-        """Process a line of unsquashfs output."""
+        """Process a line of unsquashfs output with functional state updates."""
         progress_found = False
 
         # First try to parse standard progress output
-        if self.total_files is not None:
-            progress = parse_unsquashfs_progress(line, self.total_files)
+        if self._state.total_files is not None:
+            progress = parse_unsquashfs_progress(line, self._state.total_files)
             if progress:
-                self.last_progress = progress
+                new_state = self._update_with_progress(progress)
+                self._state = new_state
                 self.zenity_service.update(progress)
                 progress_found = True
 
         # If no standard progress, try file-based progress estimation
         if not progress_found:
-            self._process_file_line(line)
+            new_state = self._process_file_line_functional(line)
+            if new_state != self._state:
+                self._state = new_state
 
         if self.zenity_service.check_cancelled():
             raise ExtractCancelledError("Extract cancelled by user")
 
-    def _process_file_line(self, line: str):
-        """Process file processing lines for progress estimation."""
+    def _update_with_progress(
+        self, progress: UnsquashfsProgress
+    ) -> ExtractProgressState:
+        """Pure function to update state with progress."""
+        return ExtractProgressState(
+            last_progress=progress,
+            file_count=self._state.file_count,
+            total_files=self._state.total_files,
+        )
+
+    def _process_file_line_functional(self, line: str) -> ExtractProgressState:
+        """Pure function to process file lines and return new state."""
         # Check if this is a file creation line
         created_match = UNSQUASHFS_CREATED_PATTERN.match(line)
-        if created_match:
-            try:
-                created_files = int(created_match.group(1))
-                # Ignore zero files (initial state)
-                if created_files == 0:
-                    return
-                self.file_count = created_files
+        if not created_match:
+            return self._state
 
-                # Estimate progress based on file count if we have total files
-                if self.total_files is not None and self.total_files > 0:
-                    percentage = min(
-                        99, int((self.file_count / self.total_files) * 100)
-                    )
+        try:
+            created_files = int(created_match.group(1))
+            # Ignore zero files (initial state)
+            if created_files == 0:
+                return self._state
 
-                    # Create a mock progress object
-                    mock_progress = UnsquashfsProgress(
-                        current_files=self.file_count,
-                        total_files=self.total_files,
-                        percentage=percentage,
-                    )
-                    self.last_progress = mock_progress
-                    self.zenity_service.update(mock_progress)
-            except (ValueError, IndexError):
-                # If we can't parse, just ignore this line
-                pass
+            # Estimate progress based on file count if we have total files
+            if self._state.total_files is not None and self._state.total_files > 0:
+                percentage = min(
+                    99, int((created_files / self._state.total_files) * 100)
+                )
+
+                # Create a mock progress object
+                mock_progress = UnsquashfsProgress(
+                    current_files=created_files,
+                    total_files=self._state.total_files,
+                    percentage=percentage,
+                )
+
+                # Update Zenity service with new progress
+                self.zenity_service.update(mock_progress)
+
+                return ExtractProgressState(
+                    last_progress=mock_progress,
+                    file_count=created_files,
+                    total_files=self._state.total_files,
+                )
+            else:
+                # Update file count but don't change progress
+                return ExtractProgressState(
+                    last_progress=self._state.last_progress,
+                    file_count=created_files,
+                    total_files=self._state.total_files,
+                )
+        except (ValueError, IndexError):
+            # If we can't parse, just return current state
+            return self._state
 
     def set_total_files(self, total_files: int):
-        """Set the total number of files for progress estimation."""
-        self.total_files = total_files
+        """Functional update of total files."""
+        self._state = ExtractProgressState(
+            last_progress=self._state.last_progress,
+            file_count=self._state.file_count,
+            total_files=total_files,
+        )

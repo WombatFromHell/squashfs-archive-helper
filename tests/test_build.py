@@ -11,7 +11,7 @@ from subprocess import CalledProcessError
 
 import pytest
 
-from squish.build import BuildManager, BuildConfiguration, CommandConfiguration
+from squish.build import BuildConfiguration, BuildManager, CommandConfiguration
 from squish.config import SquishFSConfig
 from squish.errors import BuildError, MksquashfsCommandExecutionError
 
@@ -181,7 +181,9 @@ class TestBuildSquashFS:
     def test_build_squashfs_source_not_found(self, manager):
         """Test build operation with non-existent source."""
         with pytest.raises(BuildError, match="Source not found"):
-            config = BuildConfiguration(source="/nonexistent/source", output="/output.sqsh")
+            config = BuildConfiguration(
+                source="/nonexistent/source", output="/output.sqsh"
+            )
             manager.build_squashfs(config)
 
     def test_build_squashfs_output_exists(self, manager, build_test_files):
@@ -197,7 +199,7 @@ class TestBuildSquashFS:
     def test_build_squashfs_with_default_output(
         self, mocker, manager, build_test_files
     ):
-        """Test build operation with default output filename generation."""
+        """Test build operation with default output filename generation (source-based)."""
         source = build_test_files["source"]
 
         # Mock subprocess.run
@@ -227,7 +229,7 @@ class TestBuildSquashFS:
         # Verify mksquashfs was called with a generated filename
         assert mock_run.call_count >= 3  # nproc + mksquashfs + sha256sum
 
-        # Check that the generated filename follows the expected pattern
+        # Check that the generated filename follows the expected pattern (source-based)
         mksquashfs_calls = [
             call for call in mock_run.call_args_list if call.args[0][0] == "mksquashfs"
         ]
@@ -242,9 +244,167 @@ class TestBuildSquashFS:
 
         filename = os.path.basename(generated_output)
 
+        # Should be based on source directory name
+        source_name = os.path.basename(str(source))
+        expected_filename = f"{source_name}.sqsh"
+        assert filename == expected_filename
+        assert filename.endswith(".sqsh")
+
+    def test_build_squashfs_with_source_based_filename(
+        self, mocker, manager, build_test_files
+    ):
+        """Test build operation with source-based filename generation."""
+        source = build_test_files["source"]
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("squish.build.subprocess.run")
+
+        # Mock subprocess.run to return appropriate values
+        def mock_run_side_effect(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[0] == "nproc":
+                return mocker.MagicMock(stdout="4\n", returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "mksquashfs":
+                return mocker.MagicMock(returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "sha256sum":
+                # Return a mock with proper stdout for checksum
+                mock_result = mocker.MagicMock()
+                mock_result.stdout = f"d41d8cd98f00b204e9800998ecf8427e  {cmd[1]}\n"
+                mock_result.returncode = 0
+                mock_result.check = lambda: True
+                return mock_result
+            return mocker.MagicMock(returncode=0, check=lambda: True)
+
+        mock_run.side_effect = mock_run_side_effect
+
+        # Test building without specifying output - should use source name
+        config = BuildConfiguration(source=str(source), output=None)
+        manager.build_squashfs(config)
+
+        # Verify mksquashfs was called with a source-based filename
+        assert mock_run.call_count >= 3  # nproc + mksquashfs + sha256sum
+
+        # Check that the generated filename is based on the source directory name
+        mksquashfs_calls = [
+            call for call in mock_run.call_args_list if call.args[0][0] == "mksquashfs"
+        ]
+        assert len(mksquashfs_calls) >= 1
+
+        generated_output = mksquashfs_calls[0].args[0][
+            2
+        ]  # Third argument is the output file
+
+        # Extract just the filename from the full path
+        import os
+
+        filename = os.path.basename(generated_output)
+
+        # Should be based on source directory name
+        source_name = os.path.basename(str(source))
+        expected_filename = f"{source_name}.sqsh"
+        assert filename == expected_filename
+
+    def test_build_squashfs_with_source_based_filename_fallback(
+        self, mocker, manager, build_test_files
+    ):
+        """Test build operation with source-based filename fallback when file exists."""
+        source = build_test_files["source"]
+
+        # Create a file with the expected source-based name to trigger fallback
+        expected_output = Path(str(source) + ".sqsh")
+        expected_output.touch()  # Create the file so it exists
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("squish.build.subprocess.run")
+
+        # Mock subprocess.run to return appropriate values
+        def mock_run_side_effect(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[0] == "nproc":
+                return mocker.MagicMock(stdout="4\n", returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "mksquashfs":
+                return mocker.MagicMock(returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "sha256sum":
+                # Return a mock with proper stdout for checksum
+                mock_result = mocker.MagicMock()
+                mock_result.stdout = f"d41d8cd98f00b204e9800998ecf8427e  {cmd[1]}\n"
+                mock_result.returncode = 0
+                mock_result.check = lambda: True
+                return mock_result
+            return mocker.MagicMock(returncode=0, check=lambda: True)
+
+        mock_run.side_effect = mock_run_side_effect
+
+        # Test building without specifying output - should fall back to archive pattern
+        config = BuildConfiguration(source=str(source), output=None)
+        manager.build_squashfs(config)
+
+        # Verify mksquashfs was called with a generated filename
+        assert mock_run.call_count >= 3  # nproc + mksquashfs + sha256sum
+
+        # Check that the generated filename follows the fallback pattern
+        mksquashfs_calls = [
+            call for call in mock_run.call_args_list if call.args[0][0] == "mksquashfs"
+        ]
+        assert len(mksquashfs_calls) >= 1
+
+        generated_output = mksquashfs_calls[0].args[0][
+            2
+        ]  # Third argument is the output file
+
+        # Extract just the filename from the full path
+        import os
+
+        filename = os.path.basename(generated_output)
+
+        # Should fall back to archive pattern when source-based name exists
         assert filename.startswith("archive-")
         assert filename.endswith(".sqsh")
         assert "-" in filename
+
+    def test_keep_as_directory_flag_in_command(self, mocker, build_test_files):
+        """Test that -keep-as-directory flag is included in mksquashfs command."""
+        source = build_test_files["source"]
+        output = build_test_files["tmp_path"] / "output.sqsh"
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("squish.build.subprocess.run")
+
+        # Mock subprocess.run to return appropriate values
+        def mock_run_side_effect(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[0] == "nproc":
+                return mocker.MagicMock(stdout="4\n", returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "mksquashfs":
+                return mocker.MagicMock(returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "sha256sum":
+                # Return a mock with proper stdout for checksum
+                mock_result = mocker.MagicMock()
+                mock_result.stdout = f"d41d8cd98f00b204e9800998ecf8427e  {cmd[1]}\n"
+                mock_result.returncode = 0
+                mock_result.check = lambda: True
+                return mock_result
+            return mocker.MagicMock(returncode=0, check=lambda: True)
+
+        mock_run.side_effect = mock_run_side_effect
+
+        config = BuildConfiguration(source=str(source), output=str(output))
+        manager = BuildManager()
+        manager.build_squashfs(config)
+
+        # Verify mksquashfs was called
+        assert mock_run.call_count >= 3  # nproc + mksquashfs + sha256sum
+
+        # Check that the mksquashfs command includes -keep-as-directory flag
+        mksquashfs_calls = [
+            call for call in mock_run.call_args_list if call.args[0][0] == "mksquashfs"
+        ]
+        assert len(mksquashfs_calls) >= 1
+
+        command = mksquashfs_calls[0].args[0]
+        assert "-keep-as-directory" in command
+
+        # Verify the flag is in the correct position (after -info and before excludes)
+        keep_as_dir_index = command.index("-keep-as-directory")
+        info_index = command.index("-info")
+        assert keep_as_dir_index > info_index  # -keep-as-directory comes after -info
 
 
 class TestBuildCommandExecution:
@@ -639,11 +799,92 @@ class TestBuildCoverageGaps:
 
             # This should not raise an exception even though Zenity is unavailable
             # The key test is that the build continues with console fallback
-            config = BuildConfiguration(source=str(source), output=str(output), progress=True)
+            config = BuildConfiguration(
+                source=str(source), output=str(output), progress=True
+            )
             manager.build_squashfs(config)
 
         # If we reach here, the build completed successfully with Zenity fallback
         # The main assertion is that no exception was raised
+
+    def test_keep_as_directory_flag_in_progress_command(self, mocker):
+        """Test that -keep-as-directory flag is included in mksquashfs command with progress."""
+        from squish.progress import ZenityProgressService
+
+        config = SquishFSConfig()
+        manager = BuildManager(config)
+
+        # Mock subprocess.Popen and related functionality
+        mock_popen = mocker.patch("subprocess.Popen")
+        mock_process = mocker.MagicMock()
+        mock_process.stdout = iter(
+            [
+                "[=====] 10/100  10%",
+                "[=======] 25/100  25%",
+                "[=========] 50/100  50%",
+                "[==============] 75/100  75%",
+                "[================] 100/100  100%",
+            ]
+        )
+        mock_process.returncode = 0
+        mock_process.wait.return_value = 0
+        mock_popen.return_value = mock_process
+
+        # Mock ZenityProgressService
+        mock_zenity_service = mocker.MagicMock(spec=ZenityProgressService)
+        mock_zenity_service.check_cancelled.return_value = False
+        mocker.patch.object(manager, "_count_files_in_directory", return_value=100)
+
+        # Create temporary files for the build
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source"
+            source.mkdir()
+            (source / "test.txt").write_text("test content")
+
+            output = Path(temp_dir) / "output.sqsh"
+
+            # Mock subprocess.run for nproc and sha256sum
+            def mock_run_side_effect(cmd, **kwargs):
+                if cmd[0] == "nproc":
+                    result = mocker.MagicMock()
+                    result.stdout = "4\n"
+                    return result
+                elif cmd[0] == "sha256sum":
+                    result = mocker.MagicMock()
+                    result.stdout = f"dummy_checksum  {output}\n"
+                    return result
+                elif cmd[0] == "which":
+                    return mocker.MagicMock()
+                return mocker.MagicMock()
+
+            mock_run = mocker.patch("subprocess.run")
+            mock_run.side_effect = mock_run_side_effect
+
+            # Execute the build with progress
+            command_config = CommandConfiguration(
+                source=str(source),
+                output=str(output),
+                excludes=[],
+                compression="zstd",
+                block_size="1M",
+                processors=4,
+                progress_service=mock_zenity_service,
+            )
+            manager._execute_mksquashfs_command_with_progress(command_config)
+
+            # Verify that Popen was called with the correct command
+            assert mock_popen.called
+            call_args = mock_popen.call_args[0][0]
+
+            # Check that the command includes -keep-as-directory flag
+            assert "-keep-as-directory" in call_args
+
+            # Verify the flag is in the correct position
+            keep_as_dir_index = call_args.index("-keep-as-directory")
+            info_index = call_args.index("-info")
+            assert (
+                keep_as_dir_index > info_index
+            )  # -keep-as-directory comes after -info
 
 
 class TestBuildBranchCoverage:
@@ -827,7 +1068,9 @@ class TestBuildBranchCoverage:
 
         # Test source not found
         with pytest.raises(BuildError, match="Source not found"):
-            config = BuildConfiguration(source="/nonexistent/source", output="/tmp/output.sqsh")
+            config = BuildConfiguration(
+                source="/nonexistent/source", output="/tmp/output.sqsh"
+            )
             manager.build_squashfs(config)
 
         # Test output exists
@@ -909,6 +1152,245 @@ class TestBuildBranchCoverage:
             mock_process.wait.assert_called_once()
             # Verify Zenity service was closed successfully
             mock_zenity_service.close.assert_called_with(success=True)
+
+
+class TestSourceBasedFilenameIntegration:
+    """Integration tests for source-based filename generation."""
+
+    def test_build_manager_source_naming_directory(
+        self, mocker, build_manager, build_test_files
+    ):
+        """Test that BuildManager generates correct filename from directory name."""
+        # Use the existing source directory from build_test_files
+        source_dir = build_test_files["source"]
+
+        # Mock subprocess.run to avoid actual mksquashfs execution
+        mock_run = mocker.patch("squish.build.subprocess.run")
+
+        def mock_run_side_effect(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[0] == "nproc":
+                return mocker.MagicMock(stdout="4\n", returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "mksquashfs":
+                return mocker.MagicMock(returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "sha256sum":
+                mock_result = mocker.MagicMock()
+                mock_result.stdout = f"d41d8cd98f00b204e9800998ecf8427e  {cmd[1]}\n"
+                mock_result.returncode = 0
+                mock_result.check = lambda: True
+                return mock_result
+            return mocker.MagicMock(returncode=0, check=lambda: True)
+
+        mock_run.side_effect = mock_run_side_effect
+
+        # Test the build process
+        config = BuildConfiguration(source=str(source_dir), output=None)
+        build_manager.build_squashfs(config)
+
+        # Verify that mksquashfs was called with the expected output filename
+        mksquashfs_calls = [
+            call for call in mock_run.call_args_list if call.args[0][0] == "mksquashfs"
+        ]
+        assert len(mksquashfs_calls) >= 1
+
+        generated_output = mksquashfs_calls[0].args[0][2]  # Third argument is output
+        expected_output = str(source_dir.parent / "source.sqsh")
+
+        assert generated_output == expected_output
+
+    def test_build_manager_source_naming_file(self, mocker, build_manager):
+        """Test that BuildManager generates correct filename from file name (stem)."""
+        # Create a temporary file for testing
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_file = Path(temp_dir) / "MyProject.tar.gz"
+            source_file.write_text("test content")
+
+            # Mock subprocess.run to avoid actual mksquashfs execution
+            mock_run = mocker.patch("squish.build.subprocess.run")
+
+            def mock_run_side_effect(cmd, **kwargs):
+                if isinstance(cmd, list) and cmd[0] == "nproc":
+                    return mocker.MagicMock(
+                        stdout="4\n", returncode=0, check=lambda: True
+                    )
+                elif isinstance(cmd, list) and cmd[0] == "mksquashfs":
+                    return mocker.MagicMock(returncode=0, check=lambda: True)
+                elif isinstance(cmd, list) and cmd[0] == "sha256sum":
+                    mock_result = mocker.MagicMock()
+                    mock_result.stdout = f"d41d8cd98f00b204e9800998ecf8427e  {cmd[1]}\n"
+                    mock_result.returncode = 0
+                    mock_result.check = lambda: True
+                    return mock_result
+                return mocker.MagicMock(returncode=0, check=lambda: True)
+
+            mock_run.side_effect = mock_run_side_effect
+
+            # Test the build process
+            config = BuildConfiguration(source=str(source_file), output=None)
+            build_manager.build_squashfs(config)
+
+            # Verify that mksquashfs was called with the expected output filename
+            mksquashfs_calls = [
+                call
+                for call in mock_run.call_args_list
+                if call.args[0][0] == "mksquashfs"
+            ]
+            assert len(mksquashfs_calls) >= 1
+
+            generated_output = mksquashfs_calls[0].args[0][
+                2
+            ]  # Third argument is output
+            expected_output = str(
+                source_file.parent / "MyProject.sqsh"
+            )  # Should use stem, not full filename
+
+            assert generated_output == expected_output
+
+    def test_source_naming_fallback_when_file_exists(
+        self, mocker, build_manager, build_test_files
+    ):
+        """Test fallback to archive pattern when source-based filename already exists."""
+        # Use the existing source directory from build_test_files
+        source_dir = build_test_files["source"]
+
+        # Create the expected output file to trigger fallback
+        expected_output = Path(str(source_dir) + ".sqsh")
+        expected_output.touch()  # Create empty file
+
+        # Mock subprocess.run to avoid actual mksquashfs execution
+        mock_run = mocker.patch("squish.build.subprocess.run")
+
+        def mock_run_side_effect(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[0] == "nproc":
+                return mocker.MagicMock(stdout="4\n", returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "mksquashfs":
+                return mocker.MagicMock(returncode=0, check=lambda: True)
+            elif isinstance(cmd, list) and cmd[0] == "sha256sum":
+                mock_result = mocker.MagicMock()
+                mock_result.stdout = f"d41d8cd98f00b204e9800998ecf8427e  {cmd[1]}\n"
+                mock_result.returncode = 0
+                mock_result.check = lambda: True
+                return mock_result
+            return mocker.MagicMock(returncode=0, check=lambda: True)
+
+        mock_run.side_effect = mock_run_side_effect
+
+        # Test the build process
+        config = BuildConfiguration(source=str(source_dir), output=None)
+        build_manager.build_squashfs(config)
+
+        # Verify that mksquashfs was called with a fallback archive pattern
+        mksquashfs_calls = [
+            call for call in mock_run.call_args_list if call.args[0][0] == "mksquashfs"
+        ]
+        assert len(mksquashfs_calls) >= 1
+
+        generated_output = mksquashfs_calls[0].args[0][2]  # Third argument is output
+        generated_filename = Path(generated_output).name
+
+        # Should fall back to archive-YYYYMMDD-nn.sqsh pattern
+        assert generated_filename.startswith("archive-")
+        assert generated_filename.endswith(".sqsh")
+        assert "-" in generated_filename
+        assert generated_filename != "source.sqsh"  # Should not use source name
+
+
+class TestSourceBasedFilenameEdgeCases:
+    """Edge case tests for source-based filename generation."""
+
+    def test_source_with_spaces_in_name(self, mocker, build_manager):
+        """Test source-based naming with spaces in directory name."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_dir = Path(temp_dir) / "My Project"
+            source_dir.mkdir()
+
+            # Mock subprocess.run
+            mock_run = mocker.patch("squish.build.subprocess.run")
+
+            def mock_run_side_effect(cmd, **kwargs):
+                if isinstance(cmd, list) and cmd[0] == "nproc":
+                    return mocker.MagicMock(
+                        stdout="4\n", returncode=0, check=lambda: True
+                    )
+                elif isinstance(cmd, list) and cmd[0] == "mksquashfs":
+                    return mocker.MagicMock(returncode=0, check=lambda: True)
+                elif isinstance(cmd, list) and cmd[0] == "sha256sum":
+                    mock_result = mocker.MagicMock()
+                    mock_result.stdout = f"d41d8cd98f00b204e9800998ecf8427e  {cmd[1]}\n"
+                    mock_result.returncode = 0
+                    mock_result.check = lambda: True
+                    return mock_result
+                return mocker.MagicMock(returncode=0, check=lambda: True)
+
+            mock_run.side_effect = mock_run_side_effect
+
+            # Test the build process
+            config = BuildConfiguration(source=str(source_dir), output=None)
+            build_manager.build_squashfs(config)
+
+            # Verify filename generation
+            mksquashfs_calls = [
+                call
+                for call in mock_run.call_args_list
+                if call.args[0][0] == "mksquashfs"
+            ]
+            assert len(mksquashfs_calls) >= 1
+
+            generated_output = mksquashfs_calls[0].args[0][2]
+            expected_output = str(source_dir.parent / "My Project.sqsh")
+
+            assert generated_output == expected_output
+
+    def test_source_with_special_characters(self, mocker, build_manager):
+        """Test source-based naming with special characters in directory name."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_dir = Path(temp_dir) / "My-Project_1.0"
+            source_dir.mkdir()
+
+            # Mock subprocess.run
+            mock_run = mocker.patch("squish.build.subprocess.run")
+
+            def mock_run_side_effect(cmd, **kwargs):
+                if isinstance(cmd, list) and cmd[0] == "nproc":
+                    return mocker.MagicMock(
+                        stdout="4\n", returncode=0, check=lambda: True
+                    )
+                elif isinstance(cmd, list) and cmd[0] == "mksquashfs":
+                    return mocker.MagicMock(returncode=0, check=lambda: True)
+                elif isinstance(cmd, list) and cmd[0] == "sha256sum":
+                    mock_result = mocker.MagicMock()
+                    mock_result.stdout = f"d41d8cd98f00b204e9800998ecf8427e  {cmd[1]}\n"
+                    mock_result.returncode = 0
+                    mock_result.check = lambda: True
+                    return mock_result
+                return mocker.MagicMock(returncode=0, check=lambda: True)
+
+            mock_run.side_effect = mock_run_side_effect
+
+            # Test the build process
+            config = BuildConfiguration(source=str(source_dir), output=None)
+            build_manager.build_squashfs(config)
+
+            # Verify filename generation
+            mksquashfs_calls = [
+                call
+                for call in mock_run.call_args_list
+                if call.args[0][0] == "mksquashfs"
+            ]
+            assert len(mksquashfs_calls) >= 1
+
+            generated_output = mksquashfs_calls[0].args[0][2]
+            expected_output = str(source_dir.parent / "My-Project_1.0.sqsh")
+
+            assert generated_output == expected_output
 
 
 class TestBuildExceptionCoverage:
@@ -1268,7 +1750,9 @@ class TestBuildProgressTrackingCoverage:
         mock_checksum = mocker.patch.object(verbose_manager, "_generate_checksum")
 
         # Execute the build with progress and processors=None (should fallback to 1)
-        config = BuildConfiguration(source=source, output=output, progress=True, processors=None)
+        config = BuildConfiguration(
+            source=source, output=output, progress=True, processors=None
+        )
         verbose_manager.build_squashfs(config)
 
         # Verify that the build completed (fallback to 1 processor worked)

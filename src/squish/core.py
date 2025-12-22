@@ -7,7 +7,7 @@ providing a unified interface for all functionality.
 
 from typing import Optional
 
-from .build import BuildManager
+from .build import BuildConfiguration, BuildManager
 from .checksum import ChecksumManager
 from .config import SquishFSConfig
 from .dependencies import check_all_dependencies
@@ -51,8 +51,8 @@ class SquashFSManager:
 
     def build_squashfs(
         self,
-        source: str,
-        output: str,
+        source: str | list[str],
+        output: str | None = None,
         excludes: list[str] | None = None,
         exclude_file: str | None = None,
         wildcards: bool = False,
@@ -64,19 +64,20 @@ class SquashFSManager:
         progress_service=None,
     ) -> None:
         """Build a SquashFS archive."""
-        self.build_manager.build_squashfs(
-            source,
-            output,
-            excludes,
-            exclude_file,
-            wildcards,
-            regex,
-            compression,
-            block_size,
-            processors,
-            progress,
-            progress_service,
+        config = BuildConfiguration(
+            source=source,
+            output=output,
+            excludes=excludes,
+            exclude_file=exclude_file,
+            wildcards=wildcards,
+            regex=regex,
+            compression=compression,
+            block_size=block_size,
+            processors=processors,
+            progress=progress,
+            progress_service=progress_service,
         )
+        self.build_manager.build_squashfs(config)
 
     def list_squashfs(self, archive: str) -> None:
         """List contents of a SquashFS archive."""
