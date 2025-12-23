@@ -35,16 +35,7 @@ class AmbiguousCommand(Exception):
     pass
 
 
-# Command abbreviation system - keep only the most common single-letter aliases
-COMMAND_ALIASES = {
-    "m": "mount",
-    "um": "unmount",
-    "c": "check",
-    "b": "build",
-    "l": "ls",
-    "ex": "extract",
-}
-
+# All available full commands
 ALL_COMMANDS = ["mount", "unmount", "check", "build", "extract", "ls"]
 
 
@@ -54,16 +45,9 @@ def parse_args() -> argparse.Namespace:
         description="SquashFS archive management tool - mount, unmount, build, and list SquashFS archives",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Command abbreviations:
-  mount    -> m
-  unmount  -> um
-  check    -> c
-  build    -> b
-  ls       -> l
-  extract  -> ex
-
-Prefix matching is supported for commands (minimum 2 characters).
-For example: 'mou' -> 'mount', 'bu' -> 'build', 'lis' -> 'ls'""".strip(),
+Unique prefix matching is supported for all commands.
+For example: 'm' -> 'mount', 'bu' -> 'build', 'ext' -> 'extract', 'l' -> 'ls'.
+Ambiguous abbreviations will result in an error with suggestions.""".strip(),
     )
 
     # Add global verbose flag
@@ -75,9 +59,7 @@ For example: 'mou' -> 'mount', 'bu' -> 'build', 'lis' -> 'ls'""".strip(),
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Mount command
-    mount_parser = subparsers.add_parser(
-        "mount", help="Mount a SquashFS archive", aliases=["m"]
-    )
+    mount_parser = subparsers.add_parser("mount", help="Mount a SquashFS archive")
     mount_parser.add_argument("file", help="Path to the .sqs or .squashfs file")
     mount_parser.add_argument(
         "mount_point", nargs="?", default=None, help="Path to mount the squashfs file"
@@ -87,7 +69,6 @@ For example: 'mou' -> 'mount', 'bu' -> 'build', 'lis' -> 'ls'""".strip(),
     unmount_parser = subparsers.add_parser(
         "unmount",
         help="Unmount a SquashFS archive",
-        aliases=["um"],
     )
     unmount_parser.add_argument("file", help="Path to the .sqs or .squashfs file")
     unmount_parser.add_argument(
@@ -98,14 +79,11 @@ For example: 'mou' -> 'mount', 'bu' -> 'build', 'lis' -> 'ls'""".strip(),
     check_parser = subparsers.add_parser(
         "check",
         help="Verify checksum of a SquashFS archive",
-        aliases=["c"],
     )
     check_parser.add_argument("file", help="Path to the .sqs or .squashfs file")
 
     # Build command
-    build_parser = subparsers.add_parser(
-        "build", help="Create a SquashFS archive", aliases=["b"]
-    )
+    build_parser = subparsers.add_parser("build", help="Create a SquashFS archive")
     build_parser.add_argument(
         "sources", nargs="+", help="Source directories/files to archive"
     )
@@ -142,14 +120,12 @@ For example: 'mou' -> 'mount', 'bu' -> 'build', 'lis' -> 'ls'""".strip(),
 
     # List command
     list_parser = subparsers.add_parser(
-        "ls", help="List contents of a SquashFS archive", aliases=["l"]
+        "ls", help="List contents of a SquashFS archive"
     )
     list_parser.add_argument("archive", help="Path to the SquashFS archive")
 
     # Extract command
-    extract_parser = subparsers.add_parser(
-        "extract", help="Extract a SquashFS archive", aliases=["ex"]
-    )
+    extract_parser = subparsers.add_parser("extract", help="Extract a SquashFS archive")
     extract_parser.add_argument("archive", help="Path to the SquashFS archive")
     extract_parser.add_argument(
         "-o",
@@ -187,67 +163,11 @@ def get_config_from_args(args: argparse.Namespace) -> SquishFSConfig:
     return config
 
 
-def _resolve_via_aliases(command: str) -> str:
-    """Pure function - resolve via aliases."""
-    if command in COMMAND_ALIASES:
-        return COMMAND_ALIASES[command]
-    raise CommandNotFound(command)
-
-
-def _resolve_via_exact_match(command: str) -> str:
-    """Pure function - resolve via exact match."""
-    if command in ALL_COMMANDS:
-        return command
-    raise CommandNotFound(command)
-
-
-def _resolve_via_prefix_matching(command: str) -> str:
-    """Pure function - resolve via prefix matching."""
-    if len(command) < 2:
-        raise CommandNotFound(command)
-
-    matches = [cmd for cmd in ALL_COMMANDS if cmd.startswith(command)]
-
-    if len(matches) == 1:
-        return matches[0]
-    elif len(matches) > 1:
-        raise AmbiguousCommand(command, matches)
-
-    raise CommandNotFound(command)
-
-
-def _generate_suggestions(command: str) -> list[str]:
-    """Pure function - generate suggestions without side effects."""
-    suggestions = []
-
-    # Find commands containing the input
-    suggestions.extend(cmd for cmd in ALL_COMMANDS if command in cmd)
-
-    # Find matching aliases
-    suggestions.extend(
-        f"{alias} ({full_cmd})"
-        for alias, full_cmd in COMMAND_ALIASES.items()
-        if command.startswith(alias) or alias.startswith(command)
-    )
-
-    return suggestions
-
-
-# Command resolution strategies in order of priority
-COMMAND_RESOLUTION_STRATEGIES = [
-    _resolve_via_aliases,
-    _resolve_via_exact_match,
-    _resolve_via_prefix_matching,
-]
-
-
 def resolve_command(command: str) -> str:
-    """Resolve command using multiple strategies with clear error handling.
+    """Resolve command using unique prefix matching.
 
-    Uses a strategy pattern to try different resolution methods in order:
-    1. Aliases
-    2. Exact matches
-    3. Prefix matching
+    Matches the input string against all available commands.
+    If exactly one command starts with the input, it is returned.
 
     Args:
         command: The command or abbreviation to resolve
@@ -256,21 +176,27 @@ def resolve_command(command: str) -> str:
         The resolved full command name
 
     Raises:
-        ValueError: If command is ambiguous or unknown with helpful suggestions
+        ValueError: If command is ambiguous or unknown
     """
-    for strategy in COMMAND_RESOLUTION_STRATEGIES:
-        try:
-            return strategy(command)
-        except CommandNotFound:
-            continue
-        except AmbiguousCommand as e:
-            # Re-raise ambiguous commands immediately with better formatting
-            raise ValueError(
-                f"Ambiguous command '{command}': could be {', '.join(e.args[1])}"
-            )
+    if not command:
+        raise ValueError("No command provided")
 
-    # Provide suggestions only if all strategies fail
-    suggestions = _generate_suggestions(command)
+    # Exact match first
+    if command in ALL_COMMANDS:
+        return command
+
+    # Prefix matching
+    matches = [cmd for cmd in ALL_COMMANDS if cmd.startswith(command)]
+
+    if len(matches) == 1:
+        return matches[0]
+    elif len(matches) > 1:
+        raise ValueError(
+            f"Ambiguous command '{command}': could be {', '.join(matches)}"
+        )
+
+    # If no matches, suggest commands that contain the string
+    suggestions = [cmd for cmd in ALL_COMMANDS if command in cmd]
     suggestion_msg = ""
     if suggestions:
         suggestion_msg = f" Did you mean: {', '.join(suggestions)}?"
@@ -278,6 +204,44 @@ def resolve_command(command: str) -> str:
     raise ValueError(
         f"Unknown command '{command}'. Available commands: {', '.join(ALL_COMMANDS)}{suggestion_msg}"
     )
+
+
+def resolve_command_line_args(argv: list[str]) -> list[str]:
+    """Resolve command abbreviations in command line arguments.
+
+    This function looks for the subcommand in the argument list and
+    resolves any abbreviations to their full command names.
+
+    Args:
+        argv: The list of command line arguments (e.g. sys.argv)
+
+    Returns:
+        The updated list of arguments with resolved command names
+    """
+    new_argv = list(argv)
+
+    # Find the command in argv
+    # It's the first argument that doesn't start with '-' and isn't the script itself
+    command_idx = -1
+    for i, arg in enumerate(new_argv[1:], 1):
+        if not arg.startswith("-"):
+            command_idx = i
+            break
+
+    if command_idx != -1:
+        raw_command = new_argv[command_idx]
+        try:
+            resolved_command = resolve_command(raw_command)
+            # Replace the abbreviation with the full command name
+            new_argv[command_idx] = resolved_command
+        except ValueError:
+            # If resolution fails, we leave it as is so argparse can handle it
+            # and show the standard "invalid choice" error if appropriate,
+            # or it might be a valid command we don't know about yet?
+            # Actually, our resolve_command is authoritative for ALL_COMMANDS.
+            pass
+
+    return new_argv
 
 
 def get_logger_from_args(args: argparse.Namespace):
@@ -359,6 +323,41 @@ def handle_check_operation(
         sys.exit(1)
 
 
+def _resolve_build_sources_and_output(
+    sources: list[str], output: Optional[str]
+) -> tuple[list[str], Optional[str]]:
+    """Resolve sources and output path, handling implicit output in arguments."""
+    # If explicit output provided, no need to sniff arguments
+    if output is not None:
+        return sources, output
+
+    # Check for implicit output only if multiple arguments provided
+    if len(sources) > 1:
+        last_arg = sources[-1]
+        if last_arg.endswith((".sqsh", ".sqs", ".squashfs")):
+            # Last argument is likely the output
+            return sources[:-1], last_arg
+
+    return sources, None
+
+
+def _generate_auto_output_filename() -> str:
+    """Generate an automatic output filename for multi-source archives."""
+    import datetime
+    from pathlib import Path
+
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    # Find the next available number
+    base_path = Path(".")
+    counter = 1
+
+    while True:
+        output_path = base_path / f"archive-{today}-{counter:02d}.sqsh"
+        if not output_path.exists():
+            return str(output_path)
+        counter += 1
+
+
 def handle_build_operation(
     manager: SquashFSManager,
     sources: list[str],
@@ -375,66 +374,30 @@ def handle_build_operation(
 ) -> None:
     """Handle the build operation."""
     try:
-        # Auto-detect output if not explicitly provided
-        if output is None and len(sources) > 1:
-            # Check if the last argument looks like an output file
-            last_source = sources[-1]
-            if last_source.endswith((".sqsh", ".sqs", ".squashfs")):
-                # Last argument is likely the output
-                output = last_source
-                sources = sources[:-1]  # Remove output from sources
-            else:
-                # Use the first source for naming
-                output = None
-
-        # Import BuildConfiguration for both single and multiple source cases
+        # Import BuildConfiguration locally to avoid circular imports if any
         from .build import BuildConfiguration
 
-        # Handle multiple sources by passing them directly to mksquashfs
-        if len(sources) > 1:
-            # mksquashfs supports multiple source arguments natively
-            # For multiple sources with no output specified, use generic naming
-            if output is None:
-                import datetime
-                from pathlib import Path
+        # Resolve sources and output (handle implicit output arg)
+        sources, output = _resolve_build_sources_and_output(sources, output)
 
-                today = datetime.datetime.now().strftime("%Y%m%d")
-                # Find the next available number
-                output_path = Path(".") / f"archive-{today}-01.sqsh"
-                counter = 1
-                while output_path.exists():
-                    counter += 1
-                    output_path = Path(".") / f"archive-{today}-{counter:02d}.sqsh"
-                output = str(output_path)
+        # For multiple sources with no output specified, use generic naming
+        if len(sources) > 1 and output is None:
+            output = _generate_auto_output_filename()
 
-            config = BuildConfiguration(
-                source=sources,  # Pass the list of sources directly
-                output=output,
-                excludes=excludes if excludes else [],
-                exclude_file=exclude_file,
-                wildcards=wildcards,
-                regex=regex,
-                compression=compression,
-                block_size=block_size,
-                processors=processors,
-                progress=progress,
-            )
-            manager.build_manager.build_squashfs(config)
-        else:
-            # Single source case - also use BuildConfiguration for consistency
-            config = BuildConfiguration(
-                source=sources[0],
-                output=output,
-                excludes=excludes if excludes else [],
-                exclude_file=exclude_file,
-                wildcards=wildcards,
-                regex=regex,
-                compression=compression,
-                block_size=block_size,
-                processors=processors,
-                progress=progress,
-            )
-            manager.build_manager.build_squashfs(config)
+        config = BuildConfiguration(
+            source=sources[0] if len(sources) == 1 else sources,
+            output=output,
+            excludes=excludes if excludes else [],
+            exclude_file=exclude_file,
+            wildcards=wildcards,
+            regex=regex,
+            compression=compression,
+            block_size=block_size,
+            processors=processors,
+            progress=progress,
+        )
+        manager.build_manager.build_squashfs(config)
+
     except BuildError as e:
         if logger:
             logger.logger.error(f"Build failed: {e}")
@@ -552,25 +515,23 @@ def main() -> None:
     """Main entry point for the CLI with improved functional structure."""
     logger = None
     try:
+        # Before parsing with argparse, we need to resolve the command
+        # This allows arbitrary abbreviations like 'bu' for 'build' to work
+        # from the command line, which argparse subparsers don't support natively.
+        sys.argv = resolve_command_line_args(sys.argv)
+
         # Setup phase - pure operations
         args = parse_args()
         logger = get_logger_from_args(args)
         config = get_config_from_args(args)
         manager = SquashFSManager(config)
 
-        # Command resolution phase
-        try:
-            resolved_command = resolve_command(args.command)
-        except ValueError as e:
-            _log_error(logger, f"Command resolution failed: {e}")
-            sys.exit(1)
-
         # Command execution phase
-        handler = _get_command_handler(resolved_command, manager, args, logger)
+        handler = _get_command_handler(args.command, manager, args, logger)
         if handler:
             handler()
         else:
-            _log_error(logger, f"Unknown command: {resolved_command}")
+            _log_error(logger, f"Unknown command: {args.command}")
             sys.exit(1)
 
     except KeyboardInterrupt:

@@ -83,6 +83,25 @@ class ExtractManager:
             )
             return 0  # Fallback to 0 if we can't count files
 
+    def _get_xattr_suggestion(self) -> str:
+        """Get a helpful suggestion for xattr errors based on configuration."""
+        if self.config.xattr_mode == "all":
+            return (
+                "Try using --xattr-mode user-only to exclude system xattrs, "
+                "--xattr-mode none to disable xattrs entirely, or run as superuser."
+            )
+        return (
+            "Xattr extraction failed. You can try --xattr-mode none to "
+            "disable xattrs entirely or run as superuser."
+        )
+
+    def _maybe_raise_xattr_error(self, error_output: str) -> None:
+        """Raise XattrError if the output indicates an xattr-related issue."""
+        if self._is_xattr_error(error_output):
+            suggestion = self._get_xattr_suggestion()
+            error_message = f"Failed to extract archive contents: {error_output}\n\nXattr Error: {suggestion}"
+            raise XattrError(error_message)
+
     def _execute_unsquashfs_extract(
         self, archive: str, output_dir: str, resolved_output_path: str
     ) -> None:
@@ -116,31 +135,16 @@ class ExtractManager:
 
             # Handle cases where stderr might be None
             error_output = e.stderr if e.stderr else "Unknown error"
-            error_message = f"Failed to extract archive contents: {error_output}"
 
-            # Check if this is an xattr-related error (only if stderr is not None)
-            if e.stderr and self._is_xattr_error(e.stderr):
-                from .errors import XattrError
+            # Check for xattr errors first
+            if e.stderr:
+                self._maybe_raise_xattr_error(e.stderr)
 
-                # Provide helpful guidance for xattr errors
-                if self.config.xattr_mode == "all":
-                    suggestion = (
-                        "Try using --xattr-mode user-only to exclude system xattrs, "
-                        "--xattr-mode none to disable xattrs entirely, or run as superuser."
-                    )
-                else:
-                    suggestion = (
-                        "Xattr extraction failed. You can try --xattr-mode none to "
-                        "disable xattrs entirely or run as superuser."
-                    )
-
-                error_message = f"{error_message}\n\nXattr Error: {suggestion}"
-                raise XattrError(error_message)
-
+            # Fallback to generic error
             raise UnsquashfsExtractCommandExecutionError(
                 "unsquashfs",
                 e.returncode,
-                error_message,
+                f"Failed to extract archive contents: {error_output}",
             )
 
     def _build_extraction_command(
@@ -191,29 +195,13 @@ class ExtractManager:
         progress_service.close(success=False)
         progress_service.process = None
 
-        error_message = f"Failed to extract archive contents: {error_output}"
-
         # Check if this is an xattr-related error
-        if self._is_xattr_error(error_output):
-            # Provide helpful guidance for xattr errors
-            if self.config.xattr_mode == "all":
-                suggestion = (
-                    "Try using --xattr-mode user-only to exclude system xattrs, "
-                    "--xattr-mode none to disable xattrs entirely, or run as superuser."
-                )
-            else:
-                suggestion = (
-                    "Xattr extraction failed. You can try --xattr-mode none to "
-                    "disable xattrs entirely or run as superuser."
-                )
-
-            error_message = f"{error_message}\n\nXattr Error: {suggestion}"
-            raise XattrError(error_message)
+        self._maybe_raise_xattr_error(error_output)
 
         raise UnsquashfsExtractCommandExecutionError(
             "unsquashfs",
             process.returncode,
-            error_message,
+            f"Failed to extract archive contents: {error_output}",
         )
 
     def _initialize_extraction_process(
@@ -283,30 +271,13 @@ class ExtractManager:
         self, e: Exception, progress_service: ZenityProgressService, archive: str
     ) -> None:
         """Handle extraction exceptions with appropriate error conversion."""
-        if isinstance(e, ExtractCancelledError):
-            # Let cancellation errors pass through unchanged
-            raise
-        elif isinstance(e, XattrError):
-            # Let XattrError pass through unchanged
-            raise
+        if isinstance(e, (ExtractCancelledError, XattrError)):
+            # Let cancellation and already identified XattrErrors pass through unchanged
+            raise e
         elif isinstance(e, UnsquashfsExtractCommandExecutionError):
             # Check if this is an xattr-related error and re-raise as XattrError if so
-            if self._is_xattr_error(str(e)):
-                # Provide helpful guidance for xattr errors
-                if self.config.xattr_mode == "all":
-                    suggestion = (
-                        "Try using --xattr-mode user-only to exclude system xattrs, "
-                        "--xattr-mode none to disable xattrs entirely, or run as superuser."
-                    )
-                else:
-                    suggestion = (
-                        "Xattr extraction failed. You can try --xattr-mode none to "
-                        "disable xattrs entirely or run as superuser."
-                    )
-
-                error_message = f"{e}\n\nXattr Error: {suggestion}"
-                raise XattrError(error_message)
-            raise
+            self._maybe_raise_xattr_error(str(e))
+            raise e
         else:
             # Handle unexpected exceptions
             raise UnsquashfsExtractCommandExecutionError(

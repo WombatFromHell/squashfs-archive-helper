@@ -32,40 +32,43 @@ class MountTracker:
     def _read_mount_info(self, file_path: str) -> Optional[Tuple[str, str]]:
         """Read mount information from the temporary file."""
         temp_file = self._get_temp_file_path(file_path)
-        if temp_file.exists():
-            try:
-                with open(temp_file, "r") as f:
-                    # Read both lines - first line is sqs file, second is mount point
-                    sqs_file = f.readline().strip()
-                    mount_point = f.readline().strip()
-                    if sqs_file and mount_point:
-                        # Validate that the stored path matches the requested file
-                        requested_path = str(Path(file_path).resolve())
-                        if sqs_file == requested_path:
-                            # Tracking read operations are internal - only log failures
-                            # self.logger.log_tracking_operation(file_path, "read", success=True)
-                            return (sqs_file, mount_point)
-                        else:
-                            # Path conflict: tracking file exists but is for a different file
-                            self.logger.logger.error(
-                                f"Tracking file conflict: {temp_file} exists for {sqs_file}, "
-                                f"but requested operation on {requested_path}. "
-                                f"These appear to be different files with the same name."
-                            )
-                            raise SquashFSError(
-                                f"Tracking file conflict: {temp_file} exists for {sqs_file}, "
-                                f"but requested operation on {requested_path}. "
-                                f"These appear to be different files with the same name."
-                            )
-            except IOError as e:
-                self.logger.logger.error(
-                    f"Could not read mount info from {temp_file}: {e}"
-                )
-                raise SquashFSError(f"Could not read mount info from {temp_file}: {e}")
-        else:
+
+        if not temp_file.exists():
             # This is a normal condition when file is not mounted, log at debug level
             self.logger.logger.debug(f"Tracking file not found for: {file_path}")
-        return None
+            return None
+
+        try:
+            with open(temp_file, "r") as f:
+                # Read both lines - first line is sqs file, second is mount point
+                sqs_file = f.readline().strip()
+                mount_point = f.readline().strip()
+
+            if not (sqs_file and mount_point):
+                return None
+
+            # Validate that the stored path matches the requested file
+            requested_path = str(Path(file_path).resolve())
+            if sqs_file != requested_path:
+                self._handle_path_conflict(temp_file, sqs_file, requested_path)
+
+            return (sqs_file, mount_point)
+
+        except IOError as e:
+            self.logger.logger.error(f"Could not read mount info from {temp_file}: {e}")
+            raise SquashFSError(f"Could not read mount info from {temp_file}: {e}")
+
+    def _handle_path_conflict(
+        self, temp_file: Path, sqs_file: str, requested_path: str
+    ) -> None:
+        """Handle path conflict when tracking file exists but for different file."""
+        msg = (
+            f"Tracking file conflict: {temp_file} exists for {sqs_file}, "
+            f"but requested operation on {requested_path}. "
+            f"These appear to be different files with the same name."
+        )
+        self.logger.logger.error(msg)
+        raise SquashFSError(msg)
 
     def _write_mount_info(self, file_path: str, mount_point: str) -> None:
         """Write mount information to the temporary file."""

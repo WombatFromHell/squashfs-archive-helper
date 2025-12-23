@@ -68,67 +68,81 @@ class BuildManager:
         self.config = config if config else SquishFSConfig()
         self.logger = get_logger(self.config.verbose)
 
+    def _get_base_name_from_source(self, source_path: Path) -> str:
+        """Extract the base name from a file or directory source."""
+        if source_path.is_file():
+            # Remove all file extensions, not just the last one
+            base_name = source_path.name
+            # Iterate through suffixes in valid order to strip them
+            # This handles cases like archive.tar.gz -> archive
+            while source_path.suffixes:
+                suffix = source_path.suffixes[-1]
+                if base_name.endswith(suffix):
+                    base_name = base_name[: -len(suffix)]
+                # Remove the suffix from the path object for the next iteration
+                source_path = source_path.with_suffix("")
+            return base_name
+
+        # If source is a directory, use its name
+        return source_path.name
+
+    def _find_next_available_filename(
+        self, target_dir: Path, base_name: str, extension: str
+    ) -> str:
+        """Find the next available filename to avoid collisions."""
+        # Check if the base file exists first
+        output_filename = f"{base_name}{extension}"
+        output_path = target_dir / output_filename
+
+        if not output_path.exists():
+            return str(output_path)
+
+        # Fallback to the archive-(YYYYMMDD)-(nn).sqsh pattern if tailored name exists
+        # Or if we want to use the numbered pattern for everything else
+        return self._generate_numbered_archive_name(target_dir, extension)
+
+    def _generate_numbered_archive_name(self, target_dir: Path, extension: str) -> str:
+        """Generate a numbered archive name based on the current date."""
+        # Generate date string
+        date_str = datetime.datetime.now().strftime("%Y%m%d")
+        base_name_pattern = f"archive-{date_str}"
+
+        # Find all existing numbers
+        existing_numbers = set()
+        for filename in os.listdir(target_dir):
+            if filename.startswith(base_name_pattern) and filename.endswith(extension):
+                try:
+                    # Extract number part: "archive-20231222-01.sqsh" -> "01"
+                    # Length of base_pattern + 1 (for dash)
+                    start_idx = len(base_name_pattern) + 1
+                    end_idx = -len(extension)
+                    num_part = filename[start_idx:end_idx]
+                    existing_numbers.add(int(num_part))
+                except (ValueError, IndexError):
+                    continue
+
+        # Find next available number
+        next_num = 1
+        while next_num in existing_numbers:
+            next_num += 1
+
+        return str(target_dir / f"{base_name_pattern}-{next_num:02d}{extension}")
+
     def _generate_default_output_filename(self, source: str) -> str:
         """Generate default output filename based on source name or archive-(YYYYMMDD)-(nn).sqsh"""
         source_path = Path(source)
+        target_dir = source_path.parent
 
-        # If source is a single directory or file, use its name for the output
+        # Strategy 1: Try to use source name
         if source_path.is_dir() or source_path.is_file():
-            # Use the source name (without extension if it's a file) as the base name
-            if source_path.is_file():
-                # Remove all file extensions, not just the last one
-                base_name = source_path.name
-                for suffix in reversed(source_path.suffixes):
-                    if base_name.endswith(suffix):
-                        base_name = base_name[: len(base_name) - len(suffix)]
-            else:
-                base_name = source_path.name  # Use directory name
+            base_name = self._get_base_name_from_source(source_path)
+            output_path = target_dir / f"{base_name}.sqsh"
 
-            # Generate the output filename
-            output_filename = f"{base_name}.sqsh"
-            output_path = source_path.parent / output_filename
-
-            # If the output file already exists, fall back to the numbered archive pattern
             if not output_path.exists():
                 return str(output_path)
 
-        # Fallback to the original archive-(YYYYMMDD)-(nn).sqsh pattern
-        # Get the directory containing the source
-        if source_path.is_file():
-            # If source is a file, use its parent directory
-            target_dir = source_path.parent
-        else:
-            # If source is a directory, use its parent directory
-            target_dir = source_path.parent
-
-        # Generate date string
-        date_str = datetime.datetime.now().strftime("%Y%m%d")
-
-        # Find the next available number
-        base_name = f"archive-{date_str}"
-        extension = ".sqsh"
-
-        # Check for existing files with this pattern in the target directory
-        existing_files = []
-        for filename in os.listdir(target_dir):
-            if filename.startswith(base_name) and filename.endswith(extension):
-                try:
-                    # Extract the number part
-                    num_part = filename[
-                        len(base_name) + 1 : -len(extension)
-                    ]  # +1 for the dash
-                    existing_files.append(int(num_part))
-                except (ValueError, IndexError):
-                    # Skip files that don't match the expected pattern
-                    continue
-
-        # Find the next available number
-        next_num = 1
-        while next_num in existing_files:
-            next_num += 1
-
-        # Return the full path to the output file
-        return str(target_dir / f"{base_name}-{next_num:02d}{extension}")
+        # Strategy 2: Fallback to numbered archive pattern
+        return self._generate_numbered_archive_name(target_dir, ".sqsh")
 
     def _count_files_in_directory(self, directory: str | list[str]) -> int:
         """Count total files in directory for progress estimation."""

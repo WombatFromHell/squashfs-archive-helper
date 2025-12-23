@@ -27,10 +27,8 @@ def _check_single_command(cmd: str, config, logger) -> bool:
         return False
 
 
-def check_commands(
-    commands: list[str], config: Optional[SquishFSConfig] = None, logger=None
-) -> None:
-    """Check if required commands are available using functional pattern."""
+def _ensure_config_and_logger(config, logger):
+    """Ensure config and logger are initialized."""
     if config is None:
         from .config import SquishFSConfig
 
@@ -41,13 +39,22 @@ def check_commands(
 
         logger = get_logger(config.verbose)
 
-    # Use functional approach: find first missing command
-    missing_commands = [
-        cmd for cmd in commands if not _check_single_command(cmd, config, logger)
-    ]
+    return config, logger
 
-    if missing_commands:
-        missing_cmd = missing_commands[0]  # Take first missing command
+
+def check_commands(
+    commands: list[str], config: Optional[SquishFSConfig] = None, logger=None
+) -> None:
+    """Check if required commands are available using functional pattern."""
+    config, logger = _ensure_config_and_logger(config, logger)
+
+    # Use functional approach: find first missing command lazily
+    missing_cmd = next(
+        (cmd for cmd in commands if not _check_single_command(cmd, config, logger)),
+        None,
+    )
+
+    if missing_cmd:
         logger.log_dependency_check(missing_cmd, "missing")
         raise DependencyError(
             f"{missing_cmd} is not installed or not in PATH. "

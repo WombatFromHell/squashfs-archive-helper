@@ -11,6 +11,7 @@ import pytest
 from squish.cli import (
     get_config_from_args,
     parse_args,
+    resolve_command_line_args,
     validate_directory_exists,
     validate_file_exists,
 )
@@ -32,8 +33,12 @@ class TestArgumentParsing:
     def test_parse_mount_abbreviated_args(self, mocker):
         """Test parsing abbreviated mount command arguments."""
         mocker.patch("sys.argv", ["squish", "m", "test.sqs"])
+        # Resolve before parsing as in main()
+        import sys
+
+        sys.argv = resolve_command_line_args(sys.argv)
         args = parse_args()
-        assert args.command == "m"
+        assert args.command == "mount"
         assert args.file == "test.sqs"
         assert args.mount_point is None
         assert args.verbose is False
@@ -56,9 +61,12 @@ class TestArgumentParsing:
 
     def test_parse_unmount_abbreviated_args(self, mocker):
         """Test parsing abbreviated unmount command arguments."""
-        mocker.patch("sys.argv", ["squish", "um", "test.sqs"])
+        mocker.patch("sys.argv", ["squish", "u", "test.sqs"])
+        import sys
+
+        sys.argv = resolve_command_line_args(sys.argv)
         args = parse_args()
-        assert args.command == "um"
+        assert args.command == "unmount"
         assert args.file == "test.sqs"
         assert args.mount_point is None
 
@@ -182,30 +190,42 @@ class TestArgumentParsing:
     def test_parse_list_abbreviated_args(self, mocker):
         """Test parsing abbreviated list command arguments."""
         mocker.patch("sys.argv", ["squish", "l", "archive.sqsh"])
+        import sys
+
+        sys.argv = resolve_command_line_args(sys.argv)
         args = parse_args()
-        assert args.command == "l"
+        assert args.command == "ls"
         assert args.archive == "archive.sqsh"
 
     def test_parse_extract_abbreviated_args(self, mocker):
         """Test parsing abbreviated extract command arguments."""
         mocker.patch("sys.argv", ["squish", "ex", "archive.sqsh"])
+        import sys
+
+        sys.argv = resolve_command_line_args(sys.argv)
         args = parse_args()
-        assert args.command == "ex"
+        assert args.command == "extract"
         assert args.archive == "archive.sqsh"
         assert args.output == "."
 
     def test_parse_check_abbreviated_args(self, mocker):
         """Test parsing abbreviated check command arguments."""
         mocker.patch("sys.argv", ["squish", "c", "archive.sqsh"])
+        import sys
+
+        sys.argv = resolve_command_line_args(sys.argv)
         args = parse_args()
-        assert args.command == "c"
+        assert args.command == "check"
         assert args.file == "archive.sqsh"
 
     def test_parse_build_abbreviated_args(self, mocker):
         """Test parsing abbreviated build command arguments."""
         mocker.patch("sys.argv", ["squish", "b", "source", "output.sqsh"])
+        import sys
+
+        sys.argv = resolve_command_line_args(sys.argv)
         args = parse_args()
-        assert args.command == "b"
+        assert args.command == "build"
         assert args.sources == ["source", "output.sqsh"]
         assert args.output is None
 
@@ -240,10 +260,13 @@ class TestArgumentParsing:
         pass
 
     def test_parse_extract_prefix_abbreviations(self, mocker):
-        """Test parsing extract command - only single-letter alias 'ex' is supported at argparse level."""
-        # Prefix matching like 'ext', 'extr' happens in resolve_command(), not at argparse level
-        # argparse only recognizes explicit aliases, so these tests are removed
-        pass
+        """Test parsing extract command - any unique prefix is supported."""
+        mocker.patch("sys.argv", ["squish", "ext", "archive.sqsh"])
+        import sys
+
+        sys.argv = resolve_command_line_args(sys.argv)
+        args = parse_args()
+        assert args.command == "extract"
 
     def test_resolve_command_comprehensive_prefix_matching(self):
         """Test resolve_command with comprehensive prefix matching scenarios."""
@@ -269,7 +292,17 @@ class TestArgumentParsing:
 
         for cmd, expected in prefix_tests:
             result = resolve_command(cmd)
-            assert result == expected, f"Expected {expected}, got {result} for {cmd}"
+            assert result == expected, (
+                f"Expected {expected}, got {result} for prefix {cmd}"
+            )
+
+        # Test single-character unique prefixes (new behavior)
+        assert resolve_command("m") == "mount"
+        assert resolve_command("u") == "unmount"
+        assert resolve_command("c") == "check"
+        assert resolve_command("b") == "build"
+        assert resolve_command("e") == "extract"
+        assert resolve_command("l") == "ls"
 
     def test_resolve_command_invalid_prefixes(self):
         """Test resolve_command with invalid prefixes that should provide helpful suggestions."""
@@ -279,10 +312,12 @@ class TestArgumentParsing:
 
         # Test invalid prefixes that should provide suggestions
         invalid_tests = [
-            ("li", "l (ls)"),  # Should suggest 'l' alias for 'ls'
-            ("lis", "l (ls)"),  # Should suggest 'l' alias for 'ls'
-            ("x", "extract"),  # Should suggest 'extract'
-            ("e", "check, extract"),  # Should suggest multiple options
+            ("li", "ls"),  # Now 'li' matches 'ls' because it's a prefix
+            ("lis", "ls"),  # Now 'lis' matches 'ls'
+            (
+                "x",
+                "extract",
+            ),  # 'x' is not a prefix of 'extract', so it should suggest it
         ]
 
         for cmd, expected_suggestion in invalid_tests:
@@ -300,8 +335,8 @@ class TestArgumentParsing:
 
         from squish.cli import resolve_command
 
-        # Single characters that are not valid aliases
-        single_char_tests = ["x", "e", "d", "f", "g"]
+        # Single characters that are not valid prefixes
+        single_char_tests = ["x", "d", "f", "g"]
 
         for cmd in single_char_tests:
             with pytest.raises(ValueError) as exc_info:
@@ -843,14 +878,14 @@ class TestCLICoverageGaps:
     """Test cases to cover missing CLI coverage gaps."""
 
     def test_resolve_command_explicit_alias(self):
-        """Test resolve_command with explicit alias (line 155)."""
+        """Test resolve_command with unique prefix resolution (replaces explicit aliases)."""
         from squish.cli import resolve_command
 
-        # Test explicit alias resolution
+        # Test unique prefix resolution (replaces explicit aliases)
         result = resolve_command("m")
         assert result == "mount"
 
-        result = resolve_command("um")
+        result = resolve_command("u")
         assert result == "unmount"
 
     def test_resolve_command_full_name(self):
