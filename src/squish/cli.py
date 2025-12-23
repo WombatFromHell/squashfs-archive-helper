@@ -327,35 +327,18 @@ def _resolve_build_sources_and_output(
     sources: list[str], output: Optional[str]
 ) -> tuple[list[str], Optional[str]]:
     """Resolve sources and output path, handling implicit output in arguments."""
-    # If explicit output provided, no need to sniff arguments
+    # If explicit output provided via -o, use it
     if output is not None:
         return sources, output
 
-    # Check for implicit output only if multiple arguments provided
+    # Check for implicit output (last argument ending in archive extension)
+    # Only if there's more than one argument total (e.g. "squish b src output.sqsh")
     if len(sources) > 1:
         last_arg = sources[-1]
-        if last_arg.endswith((".sqsh", ".sqs", ".squashfs")):
-            # Last argument is likely the output
+        if last_arg.lower().endswith((".sqsh", ".sqs", ".squashfs")):
             return sources[:-1], last_arg
 
     return sources, None
-
-
-def _generate_auto_output_filename() -> str:
-    """Generate an automatic output filename for multi-source archives."""
-    import datetime
-    from pathlib import Path
-
-    today = datetime.datetime.now().strftime("%Y%m%d")
-    # Find the next available number
-    base_path = Path(".")
-    counter = 1
-
-    while True:
-        output_path = base_path / f"archive-{today}-{counter:02d}.sqsh"
-        if not output_path.exists():
-            return str(output_path)
-        counter += 1
 
 
 def handle_build_operation(
@@ -379,10 +362,6 @@ def handle_build_operation(
 
         # Resolve sources and output (handle implicit output arg)
         sources, output = _resolve_build_sources_and_output(sources, output)
-
-        # For multiple sources with no output specified, use generic naming
-        if len(sources) > 1 and output is None:
-            output = _generate_auto_output_filename()
 
         config = BuildConfiguration(
             source=sources[0] if len(sources) == 1 else sources,

@@ -128,21 +128,22 @@ class BuildManager:
 
         return str(target_dir / f"{base_name_pattern}-{next_num:02d}{extension}")
 
-    def _generate_default_output_filename(self, source: str) -> str:
+    def _generate_default_output_filename(self, source: str | list[str]) -> str:
         """Generate default output filename based on source name or archive-(YYYYMMDD)-(nn).sqsh"""
-        source_path = Path(source)
-        target_dir = source_path.parent
+        target_dir = Path(".")
+        extension = ".sqsh"
 
-        # Strategy 1: Try to use source name
-        if source_path.is_dir() or source_path.is_file():
+        # Strategy 1: For a single source, try to use its name
+        if isinstance(source, str):
+            source_path = Path(source)
             base_name = self._get_base_name_from_source(source_path)
-            output_path = target_dir / f"{base_name}.sqsh"
+            output_path = target_dir / f"{base_name}{extension}"
 
             if not output_path.exists():
                 return str(output_path)
 
-        # Strategy 2: Fallback to numbered archive pattern
-        return self._generate_numbered_archive_name(target_dir, ".sqsh")
+        # Strategy 2: For multiple sources or if single-source name exists, use numbered archive pattern
+        return self._generate_numbered_archive_name(target_dir, extension)
 
     def _count_files_in_directory(self, directory: str | list[str]) -> int:
         """Count total files in directory for progress estimation."""
@@ -328,9 +329,7 @@ class BuildManager:
 
         # Generate default output filename if not provided
         if config.output is None:
-            # For multiple sources, use the first source for naming
-            first_source = sources[0]
-            config.output = self._generate_default_output_filename(first_source)
+            config.output = self._generate_default_output_filename(config.source)
             if self.config.verbose:
                 self.logger.logger.info(
                     f"Generated default output filename: {config.output}"

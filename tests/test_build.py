@@ -4,6 +4,7 @@ Test cases for the build module.
 This module tests the build functionality separately.
 """
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -202,6 +203,9 @@ class TestBuildSquashFS:
         """Test build operation with default output filename generation (source-based)."""
         source = build_test_files["source"]
 
+        # Mock _generate_checksum to avoid pollution
+        mocker.patch.object(BuildManager, "_generate_checksum")
+
         # Mock subprocess.run
         mock_run = mocker.patch("squish.build.subprocess.run")
 
@@ -240,7 +244,6 @@ class TestBuildSquashFS:
         ]  # Third argument is the output file
 
         # Extract just the filename from the full path
-        import os
 
         filename = os.path.basename(generated_output)
 
@@ -255,6 +258,9 @@ class TestBuildSquashFS:
     ):
         """Test build operation with source-based filename generation."""
         source = build_test_files["source"]
+
+        # Mock _generate_checksum to avoid pollution
+        mocker.patch.object(BuildManager, "_generate_checksum")
 
         # Mock subprocess.run
         mock_run = mocker.patch("squish.build.subprocess.run")
@@ -294,7 +300,6 @@ class TestBuildSquashFS:
         ]  # Third argument is the output file
 
         # Extract just the filename from the full path
-        import os
 
         filename = os.path.basename(generated_output)
 
@@ -309,9 +314,13 @@ class TestBuildSquashFS:
         """Test build operation with source-based filename fallback when file exists."""
         source = build_test_files["source"]
 
-        # Create a file with the expected source-based name to trigger fallback
-        expected_output = Path(str(source) + ".sqsh")
-        expected_output.touch()  # Create the file so it exists
+        # Create a file in the current directory with the expected name to trigger fallback
+        source_name = os.path.basename(str(source))
+        expected_output = Path(f"{source_name}.sqsh")
+        expected_output.touch()  # Create the file so it exists in Path(".")
+
+        # Mock _generate_checksum to avoid pollution
+        mocker.patch.object(BuildManager, "_generate_checksum")
 
         # Mock subprocess.run
         mock_run = mocker.patch("squish.build.subprocess.run")
@@ -350,15 +359,16 @@ class TestBuildSquashFS:
             2
         ]  # Third argument is the output file
 
-        # Extract just the filename from the full path
-        import os
-
         filename = os.path.basename(generated_output)
 
         # Should fall back to archive pattern when source-based name exists
         assert filename.startswith("archive-")
         assert filename.endswith(".sqsh")
         assert "-" in filename
+
+        # Cleanup collision file
+        if expected_output.exists():
+            expected_output.unlink()
 
     def test_keep_as_directory_flag_in_command(self, mocker, build_test_files):
         """Test that -keep-as-directory flag is included in mksquashfs command."""
@@ -1164,6 +1174,9 @@ class TestSourceBasedFilenameIntegration:
         # Use the existing source directory from build_test_files
         source_dir = build_test_files["source"]
 
+        # Mock _generate_checksum to avoid pollution
+        mocker.patch.object(BuildManager, "_generate_checksum")
+
         # Mock subprocess.run to avoid actual mksquashfs execution
         mock_run = mocker.patch("squish.build.subprocess.run")
 
@@ -1193,7 +1206,7 @@ class TestSourceBasedFilenameIntegration:
         assert len(mksquashfs_calls) >= 1
 
         generated_output = mksquashfs_calls[0].args[0][2]  # Third argument is output
-        expected_output = str(source_dir.parent / "source.sqsh")
+        expected_output = "source.sqsh"
 
         assert generated_output == expected_output
 
@@ -1206,6 +1219,9 @@ class TestSourceBasedFilenameIntegration:
         with tempfile.TemporaryDirectory() as temp_dir:
             source_file = Path(temp_dir) / "MyProject.tar.gz"
             source_file.write_text("test content")
+
+            # Mock _generate_checksum to avoid pollution
+            mocker.patch.object(BuildManager, "_generate_checksum")
 
             # Mock subprocess.run to avoid actual mksquashfs execution
             mock_run = mocker.patch("squish.build.subprocess.run")
@@ -1242,9 +1258,7 @@ class TestSourceBasedFilenameIntegration:
             generated_output = mksquashfs_calls[0].args[0][
                 2
             ]  # Third argument is output
-            expected_output = str(
-                source_file.parent / "MyProject.sqsh"
-            )  # Should use stem, not full filename
+            expected_output = "MyProject.sqsh"  # Should use stem, not full filename
 
             assert generated_output == expected_output
 
@@ -1255,9 +1269,12 @@ class TestSourceBasedFilenameIntegration:
         # Use the existing source directory from build_test_files
         source_dir = build_test_files["source"]
 
-        # Create the expected output file to trigger fallback
-        expected_output = Path(str(source_dir) + ".sqsh")
-        expected_output.touch()  # Create empty file
+        # Create a file in the current directory with the expected name to trigger fallback
+        expected_output = Path(source_dir.name + ".sqsh")
+        expected_output.touch()  # Create empty file in Path(".")
+
+        # Mock _generate_checksum to avoid pollution
+        mocker.patch.object(BuildManager, "_generate_checksum")
 
         # Mock subprocess.run to avoid actual mksquashfs execution
         mock_run = mocker.patch("squish.build.subprocess.run")
@@ -1296,6 +1313,10 @@ class TestSourceBasedFilenameIntegration:
         assert "-" in generated_filename
         assert generated_filename != "source.sqsh"  # Should not use source name
 
+        # Cleanup collision file
+        if expected_output.exists():
+            expected_output.unlink()
+
 
 class TestSourceBasedFilenameEdgeCases:
     """Edge case tests for source-based filename generation."""
@@ -1309,6 +1330,9 @@ class TestSourceBasedFilenameEdgeCases:
             source_dir = Path(temp_dir) / "My Project"
             source_dir.mkdir()
 
+            # Mock _generate_checksum to avoid pollution
+            mocker.patch.object(BuildManager, "_generate_checksum")
+
             # Mock subprocess.run
             mock_run = mocker.patch("squish.build.subprocess.run")
 
@@ -1342,7 +1366,7 @@ class TestSourceBasedFilenameEdgeCases:
             assert len(mksquashfs_calls) >= 1
 
             generated_output = mksquashfs_calls[0].args[0][2]
-            expected_output = str(source_dir.parent / "My Project.sqsh")
+            expected_output = "My Project.sqsh"
 
             assert generated_output == expected_output
 
@@ -1355,6 +1379,9 @@ class TestSourceBasedFilenameEdgeCases:
             source_dir = Path(temp_dir) / "My-Project_1.0"
             source_dir.mkdir()
 
+            # Mock _generate_checksum to avoid pollution
+            mocker.patch.object(BuildManager, "_generate_checksum")
+
             # Mock subprocess.run
             mock_run = mocker.patch("squish.build.subprocess.run")
 
@@ -1388,7 +1415,7 @@ class TestSourceBasedFilenameEdgeCases:
             assert len(mksquashfs_calls) >= 1
 
             generated_output = mksquashfs_calls[0].args[0][2]
-            expected_output = str(source_dir.parent / "My-Project_1.0.sqsh")
+            expected_output = "My-Project_1.0.sqsh"
 
             assert generated_output == expected_output
 
@@ -1807,3 +1834,62 @@ class TestBuildProgressTrackingCoverage:
         # The actual logging calls are tested in the existing verbose logging tests
         # This test ensures the code path is executed in verbose mode
         assert True, "Build completed successfully with verbose checksum logging"
+
+
+class TestBuildFilenameInference:
+    """Test cases for output filename inference logic."""
+
+    @pytest.fixture
+    def manager(self):
+        """Create a manager."""
+        return BuildManager()
+
+    def test_multi_source_default_filename(self, manager, mocker):
+        """Test that multiple sources result in a numbered archive name by default."""
+        sources = ["dir1", "dir2"]
+        # Mock Path.exists to say source-based name exists if we were to try it
+        # but for multiple sources we should skip that anyway
+
+        # Mock _generate_numbered_archive_name to return a fixed string
+        mock_numbered = mocker.patch.object(
+            manager,
+            "_generate_numbered_archive_name",
+            return_value="archive-20231222-01.sqsh",
+        )
+
+        result = manager._generate_default_output_filename(sources)
+        assert result == "archive-20231222-01.sqsh"
+        mock_numbered.assert_called_once()
+
+
+class TestCLIBuildInference:
+    """Test cases for CLI-level build source/output resolution."""
+
+    def test_resolve_build_sources_and_output_implicit(self):
+        """Test implicit output detection in CLI arguments."""
+        from squish.cli import _resolve_build_sources_and_output
+
+        # Case: Single source, no output
+        sources, output = _resolve_build_sources_and_output(["src"], None)
+        assert sources == ["src"]
+        assert output is None
+
+        # Case: Multi source, implicit output
+        sources, output = _resolve_build_sources_and_output(
+            ["src1", "src2", "out.sqsh"], None
+        )
+        assert sources == ["src1", "src2"]
+        assert output == "out.sqsh"
+
+        # Case: Single source with implicit output should NOT treat last arg as output if matched against sources
+        # Actually our logic treats ANY last arg ending in .sqsh as output if len > 1
+        sources, output = _resolve_build_sources_and_output(["src1.sqsh"], None)
+        assert sources == ["src1.sqsh"]
+        assert output is None
+
+        # Case: Implicit output with mixed cases
+        sources, output = _resolve_build_sources_and_output(
+            ["src1", "OUT.SQUASHFS"], None
+        )
+        assert sources == ["src1"]
+        assert output == "OUT.SQUASHFS"
