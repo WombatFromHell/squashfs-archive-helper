@@ -8,6 +8,7 @@ from subprocess import CalledProcessError
 
 import pytest
 
+from squish.command_executor import MockCommandExecutor
 from squish.config import SquishFSConfig
 from squish.dependencies import (
     check_all_dependencies,
@@ -16,7 +17,6 @@ from squish.dependencies import (
     check_linux_dependencies,
 )
 from squish.errors import DependencyError
-from squish.logging import get_logger
 
 
 class TestDependencyChecking:
@@ -25,76 +25,62 @@ class TestDependencyChecking:
     def test_check_commands_success(self, mocker):
         """Test successful command checking."""
         config = SquishFSConfig()
-        logger = get_logger(config.verbose)
-
-        # Mock successful subprocess run
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = mocker.MagicMock()
+        executor = MockCommandExecutor()
+        executor.set_available_commands(["ls", "echo"])
 
         # This should not raise an exception
-        check_commands(["ls", "echo"], config, logger)
+        check_commands(["ls", "echo"], config, executor)
 
     def test_check_commands_failure(self, mocker):
         """Test failed command checking."""
         config = SquishFSConfig()
-        logger = get_logger(config.verbose)
-
-        # Mock failed subprocess run
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.side_effect = CalledProcessError(1, "which")
+        executor = MockCommandExecutor()
 
         with pytest.raises(DependencyError, match="is not installed or not in PATH"):
-            check_commands(["nonexistent_command"], config, logger)
+            check_commands(["nonexistent_command"], config, executor)
 
     def test_check_linux_dependencies(self, mocker):
         """Test Linux dependency checking."""
         config = SquishFSConfig()
-        logger = get_logger(config.verbose)
-
-        # Mock successful subprocess run
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = mocker.MagicMock()
+        executor = MockCommandExecutor()
+        executor.set_available_commands(["squashfuse", "fusermount", "sha256sum"])
 
         # This should not raise an exception
-        check_linux_dependencies(config, logger)
+        check_linux_dependencies(config, executor)
 
     def test_check_build_dependencies(self, mocker):
         """Test build dependency checking."""
         config = SquishFSConfig()
-        logger = get_logger(config.verbose)
-
-        # Mock successful subprocess run
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = mocker.MagicMock()
+        executor = MockCommandExecutor()
+        executor.set_available_commands(["mksquashfs", "unsquashfs", "nproc"])
 
         # This should not raise an exception
-        check_build_dependencies(config, logger)
+        check_build_dependencies(config, executor)
 
     def test_check_all_dependencies_linux_success(self, mocker):
         """Test all dependency checking for Linux."""
         config = SquishFSConfig()
-        logger = get_logger(config.verbose)
+        executor = MockCommandExecutor()
+        executor.set_available_commands(["squashfuse", "fusermount", "sha256sum"])
 
-        # Mock successful subprocess run and platform check
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = mocker.MagicMock()
+        # Mock platform check
         mock_platform = mocker.patch("platform.system")
         mock_platform.return_value = "Linux"
 
         # This should not raise an exception
-        check_all_dependencies(config, logger)
+        check_all_dependencies(config, executor)
 
     def test_check_all_dependencies_non_linux_error(self, mocker):
         """Test all dependency checking for non-Linux OS."""
         config = SquishFSConfig()
-        logger = get_logger(config.verbose)
+        executor = MockCommandExecutor()
 
         # Mock platform check
         mock_platform = mocker.patch("platform.system")
         mock_platform.return_value = "Windows"
 
         with pytest.raises(DependencyError, match="currently only supported on Linux"):
-            check_all_dependencies(config, logger)
+            check_all_dependencies(config, executor)
 
 
 class TestDependencyCheckingCoverageGaps:
@@ -130,3 +116,25 @@ class TestDependencyCheckingCoverageGaps:
 
         with pytest.raises(DependencyError, match="currently only supported on Linux"):
             check_all_dependencies()  # No config or logger provided
+
+    def test_check_all_dependencies_linux_calls_check_linux_dependencies_correctly(
+        self, mocker
+    ):
+        """Test that check_all_dependencies calls check_linux_dependencies with correct parameters."""
+        # Mock platform check to return Linux
+        mock_platform = mocker.patch("platform.system")
+        mock_platform.return_value = "Linux"
+
+        # Mock check_linux_dependencies to verify it's called correctly
+        mock_check_linux = mocker.patch("squish.dependencies.check_linux_dependencies")
+
+        # Create a test config
+        from squish.config import SquishFSConfig
+
+        config = SquishFSConfig()
+
+        # Call check_all_dependencies
+        check_all_dependencies(config)
+
+        # Verify check_linux_dependencies was called with config only (no logger parameter)
+        mock_check_linux.assert_called_once_with(config)

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+from .command_executor import CommandExecutor
 from .config import SquishFSConfig
 from .errors import (
     BuildError,
@@ -23,6 +24,10 @@ from .progress import (
     BuildCancelledError,
     ProgressTracker,
     ZenityProgressService,
+)
+from .tool_adapters import (
+    IMksquashfsAdapter,
+    MksquashfsAdapter,
 )
 
 
@@ -64,9 +69,20 @@ class BuildManager:
     configurations, exclude patterns, and progress tracking.
     """
 
-    def __init__(self, config: Optional[SquishFSConfig] = None):
+    def __init__(
+        self,
+        config: Optional[SquishFSConfig] = None,
+        mksquashfs_adapter: Optional[IMksquashfsAdapter] = None,
+    ):
         self.config = config if config else SquishFSConfig()
         self.logger = get_logger(self.config.verbose)
+        self.mksquashfs_adapter = mksquashfs_adapter or MksquashfsAdapter(
+            self._get_command_executor(), self.config
+        )
+
+    def _get_command_executor(self):
+        """Get a command executor instance."""
+        return CommandExecutor(self.config)
 
     def _get_base_name_from_source(self, source_path: Path) -> str:
         """Extract the base name from a file or directory source."""
@@ -128,21 +144,22 @@ class BuildManager:
 
         return str(target_dir / f"{base_name_pattern}-{next_num:02d}{extension}")
 
-    def _generate_default_output_filename(self, source: str) -> str:
+    def _generate_default_output_filename(self, source: str | list[str]) -> str:
         """Generate default output filename based on source name or archive-(YYYYMMDD)-(nn).sqsh"""
-        source_path = Path(source)
-        target_dir = source_path.parent
+        target_dir = Path(".")
+        extension = ".sqsh"
 
-        # Strategy 1: Try to use source name
-        if source_path.is_dir() or source_path.is_file():
+        # Strategy 1: For a single source, try to use its name
+        if isinstance(source, str):
+            source_path = Path(source)
             base_name = self._get_base_name_from_source(source_path)
-            output_path = target_dir / f"{base_name}.sqsh"
+            output_path = target_dir / f"{base_name}{extension}"
 
             if not output_path.exists():
                 return str(output_path)
 
-        # Strategy 2: Fallback to numbered archive pattern
-        return self._generate_numbered_archive_name(target_dir, ".sqsh")
+        # Strategy 2: For multiple sources or if single-source name exists, use numbered archive pattern
+        return self._generate_numbered_archive_name(target_dir, extension)
 
     def _count_files_in_directory(self, directory: str | list[str]) -> int:
         """Count total files in directory for progress estimation."""
@@ -197,46 +214,29 @@ class BuildManager:
         processors: int,
         progress_service=None,  # For dependency injection in tests
     ) -> None:
-        """Execute mksquashfs command to create archive."""
+        """Execute mksquashfs command to create archive using adapter."""
         # Handle both single source and multiple sources
         if isinstance(source, str):
             sources = [source]
         else:
             sources = source
 
-        command = (
-            [
-                "mksquashfs",
-            ]
-            + sources
-            + [
-                output,
-                "-comp",
-                compression,
-                "-b",
-                block_size,
-                "-processors",
-                str(processors),
-                "-info",  # Show file processing for progress estimation
-                "-keep-as-directory",  # Keep source directory structure intact
-            ]
-            + excludes
-        )
-
-        if self.config.verbose:
-            self.logger.log_command_execution(" ".join(command))
-
-        # Run mksquashfs normally
+        # Use the adapter to execute the build
         try:
-            subprocess.run(command, check=True)
-            if self.config.verbose:
-                self.logger.log_command_execution(" ".join(command), success=True)
-        except subprocess.CalledProcessError as e:
-            self.logger.log_command_execution(
-                " ".join(command), e.returncode, success=False
+            self.mksquashfs_adapter.build(
+                sources=sources,
+                output=output,
+                excludes=excludes,
+                compression=compression,
+                block_size=block_size,
+                processors=processors,
+                progress_observer=progress_service,
             )
+        except MksquashfsCommandExecutionError:
+            raise
+        except Exception as e:
             raise MksquashfsCommandExecutionError(
-                "mksquashfs", e.returncode, f"Failed to create archive: {e.stderr}"
+                "mksquashfs", getattr(e, "returncode", 1), str(e)
             )
 
     def _execute_mksquashfs_command_with_progress(
@@ -328,9 +328,7 @@ class BuildManager:
 
         # Generate default output filename if not provided
         if config.output is None:
-            # For multiple sources, use the first source for naming
-            first_source = sources[0]
-            config.output = self._generate_default_output_filename(first_source)
+            config.output = self._generate_default_output_filename(config.source)
             if self.config.verbose:
                 self.logger.logger.info(
                     f"Generated default output filename: {config.output}"

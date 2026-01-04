@@ -4,6 +4,7 @@ Test cases for the CLI module.
 This module tests the command-line interface functionality with subcommands.
 """
 
+import os
 import tempfile
 
 import pytest
@@ -21,243 +22,97 @@ from squish.errors import BuildError, ListError, SquashFSError
 class TestArgumentParsing:
     """Test command line argument parsing with subcommands."""
 
-    def test_parse_mount_args(self, mocker):
-        """Test parsing mount command arguments."""
-        mocker.patch("sys.argv", ["squish", "mount", "test.sqs"])
+    @pytest.mark.parametrize(
+        "command_args,expected_command,expected_file,expected_mount_point,expected_archive,expected_sources,expected_output",
+        [
+            # Mount command variations
+            (["mount", "test.sqs"], "mount", "test.sqs", None, None, None, None),
+            (["m", "test.sqs"], "mount", "test.sqs", None, None, None, None),
+            (
+                ["mount", "test.sqs", "/mnt/point"],
+                "mount",
+                "test.sqs",
+                "/mnt/point",
+                None,
+                None,
+                None,
+            ),
+            # Unmount command variations
+            (["unmount", "test.sqs"], "unmount", "test.sqs", None, None, None, None),
+            (["u", "test.sqs"], "unmount", "test.sqs", None, None, None, None),
+            # Check command variations
+            (["check", "test.sqs"], "check", "test.sqs", None, None, None, None),
+            (["c", "test.sqs"], "check", "test.sqs", None, None, None, None),
+            # List command variations
+            (["ls", "archive.sqsh"], "ls", None, None, "archive.sqsh", None, None),
+            (["l", "archive.sqsh"], "ls", None, None, "archive.sqsh", None, None),
+            # Extract command variations
+            (["ex", "archive.sqsh"], "extract", None, None, "archive.sqsh", None, "."),
+            # Build command variations
+            (
+                ["build", "source_dir", "output.sqsh"],
+                "build",
+                None,
+                None,
+                None,
+                ["source_dir", "output.sqsh"],
+                None,
+            ),
+            (
+                ["b", "source", "output.sqsh"],
+                "build",
+                None,
+                None,
+                None,
+                ["source", "output.sqsh"],
+                None,
+            ),
+        ],
+    )
+    def test_parse_command_arguments_parametrized(
+        self,
+        mocker,
+        command_args,
+        expected_command,
+        expected_file,
+        expected_mount_point,
+        expected_archive,
+        expected_sources,
+        expected_output,
+    ):
+        """Test command parsing with parametrized inputs."""
+        # Handle abbreviated commands that need resolution
+        if len(command_args) > 0 and (
+            len(command_args[0]) == 1 or command_args[0] in ["ex", "ext"]
+        ):
+            # This is an abbreviated command that needs resolution
+            full_args = ["squish"] + command_args
+            mocker.patch("sys.argv", full_args)
+            import sys
+
+            sys.argv = resolve_command_line_args(sys.argv)
+        else:
+            mocker.patch("sys.argv", ["squish"] + command_args)
+
         args = parse_args()
-        assert args.command == "mount"
-        assert args.file == "test.sqs"
-        assert args.mount_point is None
+
+        # Verify common attributes
+        assert args.command == expected_command
+
+        # Verify command-specific attributes
+        if expected_file is not None:
+            assert args.file == expected_file
+        if expected_mount_point is not None:
+            assert args.mount_point == expected_mount_point
+        if expected_archive is not None:
+            assert args.archive == expected_archive
+        if expected_sources is not None:
+            assert args.sources == expected_sources
+        if expected_output is not None:
+            assert args.output == expected_output
+
+        # Default values
         assert args.verbose is False
-
-    def test_parse_mount_abbreviated_args(self, mocker):
-        """Test parsing abbreviated mount command arguments."""
-        mocker.patch("sys.argv", ["squish", "m", "test.sqs"])
-        # Resolve before parsing as in main()
-        import sys
-
-        sys.argv = resolve_command_line_args(sys.argv)
-        args = parse_args()
-        assert args.command == "mount"
-        assert args.file == "test.sqs"
-        assert args.mount_point is None
-        assert args.verbose is False
-
-    def test_parse_mount_with_mount_point(self, mocker):
-        """Test parsing mount command with mount point."""
-        mocker.patch("sys.argv", ["squish", "mount", "test.sqs", "/mnt/point"])
-        args = parse_args()
-        assert args.command == "mount"
-        assert args.file == "test.sqs"
-        assert args.mount_point == "/mnt/point"
-
-    def test_parse_unmount_args(self, mocker):
-        """Test parsing unmount command arguments."""
-        mocker.patch("sys.argv", ["squish", "unmount", "test.sqs"])
-        args = parse_args()
-        assert args.command == "unmount"
-        assert args.file == "test.sqs"
-        assert args.mount_point is None
-
-    def test_parse_unmount_abbreviated_args(self, mocker):
-        """Test parsing abbreviated unmount command arguments."""
-        mocker.patch("sys.argv", ["squish", "u", "test.sqs"])
-        import sys
-
-        sys.argv = resolve_command_line_args(sys.argv)
-        args = parse_args()
-        assert args.command == "unmount"
-        assert args.file == "test.sqs"
-        assert args.mount_point is None
-
-    def test_parse_check_args(self, mocker):
-        """Test parsing check command arguments."""
-        mocker.patch("sys.argv", ["squish", "check", "test.sqs"])
-        args = parse_args()
-        assert args.command == "check"
-        assert args.file == "test.sqs"
-
-    def test_parse_build_args(self, mocker):
-        """Test parsing build command arguments."""
-        mocker.patch("sys.argv", ["squish", "build", "source_dir", "output.sqsh"])
-        args = parse_args()
-        assert args.command == "build"
-        assert args.sources == ["source_dir", "output.sqsh"]
-        assert args.output is None
-        assert args.compression == "zstd"
-        assert args.block_size == "1M"
-        assert args.processors is None
-
-    def test_parse_build_with_options(self, mocker):
-        """Test parsing build command with all options."""
-        mocker.patch(
-            "sys.argv",
-            [
-                "squish",
-                "build",
-                "source_dir",
-                "output.sqsh",
-                "-e",
-                "*.tmp",
-                "-f",
-                "exclude.txt",
-                "-w",
-                "-c",
-                "gzip",
-                "-b",
-                "256K",
-                "-p",
-                "4",
-            ],
-        )
-        args = parse_args()
-        assert args.command == "build"
-        assert args.sources == ["source_dir", "output.sqsh"]
-        assert args.output is None
-        assert args.exclude == ["*.tmp"]
-        assert args.exclude_file == "exclude.txt"
-        assert args.wildcards is True
-        assert args.regex is False
-        assert args.compression == "gzip"
-        assert args.block_size == "256K"
-        assert args.processors == 4
-
-    def test_parse_build_without_output(self, mocker):
-        """Test parsing build command without output filename."""
-        mocker.patch(
-            "sys.argv",
-            [
-                "squish",
-                "build",
-                "source_dir",
-            ],
-        )
-        args = parse_args()
-        assert args.command == "build"
-        assert args.sources == ["source_dir"]
-        assert args.output is None
-        assert args.compression == "zstd"
-        assert args.block_size == "1M"
-        assert args.processors is None
-
-    def test_parse_build_with_explicit_output(self, mocker):
-        """Test parsing build command with explicit output filename."""
-        mocker.patch(
-            "sys.argv",
-            [
-                "squish",
-                "build",
-                "source_dir",
-                "-o",
-                "output.sqsh",
-            ],
-        )
-        args = parse_args()
-        assert args.command == "build"
-        assert args.sources == ["source_dir"]
-        assert args.output == "output.sqsh"
-        assert args.compression == "zstd"
-        assert args.block_size == "1M"
-        assert args.processors is None
-
-    def test_parse_build_multiple_sources(self, mocker):
-        """Test parsing build command with multiple sources."""
-        mocker.patch(
-            "sys.argv",
-            [
-                "squish",
-                "build",
-                "source_dir1",
-                "source_dir2",
-                "output.sqsh",
-            ],
-        )
-        args = parse_args()
-        assert args.command == "build"
-        assert args.sources == ["source_dir1", "source_dir2", "output.sqsh"]
-        assert args.output is None  # Will be auto-detected
-        assert args.compression == "zstd"
-        assert args.block_size == "1M"
-        assert args.processors is None
-
-    def test_parse_list_args(self, mocker):
-        """Test parsing list command arguments."""
-        mocker.patch("sys.argv", ["squish", "ls", "archive.sqsh"])
-        args = parse_args()
-        assert args.command == "ls"
-        assert args.archive == "archive.sqsh"
-
-    def test_parse_list_abbreviated_args(self, mocker):
-        """Test parsing abbreviated list command arguments."""
-        mocker.patch("sys.argv", ["squish", "l", "archive.sqsh"])
-        import sys
-
-        sys.argv = resolve_command_line_args(sys.argv)
-        args = parse_args()
-        assert args.command == "ls"
-        assert args.archive == "archive.sqsh"
-
-    def test_parse_extract_abbreviated_args(self, mocker):
-        """Test parsing abbreviated extract command arguments."""
-        mocker.patch("sys.argv", ["squish", "ex", "archive.sqsh"])
-        import sys
-
-        sys.argv = resolve_command_line_args(sys.argv)
-        args = parse_args()
-        assert args.command == "extract"
-        assert args.archive == "archive.sqsh"
-        assert args.output == "."
-
-    def test_parse_check_abbreviated_args(self, mocker):
-        """Test parsing abbreviated check command arguments."""
-        mocker.patch("sys.argv", ["squish", "c", "archive.sqsh"])
-        import sys
-
-        sys.argv = resolve_command_line_args(sys.argv)
-        args = parse_args()
-        assert args.command == "check"
-        assert args.file == "archive.sqsh"
-
-    def test_parse_build_abbreviated_args(self, mocker):
-        """Test parsing abbreviated build command arguments."""
-        mocker.patch("sys.argv", ["squish", "b", "source", "output.sqsh"])
-        import sys
-
-        sys.argv = resolve_command_line_args(sys.argv)
-        args = parse_args()
-        assert args.command == "build"
-        assert args.sources == ["source", "output.sqsh"]
-        assert args.output is None
-
-    def test_parse_mount_prefix_abbreviations(self, mocker):
-        """Test parsing mount command - only single-letter alias 'm' is supported at argparse level."""
-        # Prefix matching like 'mo', 'mou', 'moun' happens in resolve_command(), not at argparse level
-        # argparse only recognizes explicit aliases, so these tests are removed
-        pass
-
-    def test_parse_unmount_prefix_abbreviations(self, mocker):
-        """Test parsing unmount command - only single-letter alias 'um' is supported at argparse level."""
-        # Prefix matching like 'un', 'unm', 'unmo' happens in resolve_command(), not at argparse level
-        # argparse only recognizes explicit aliases, so these tests are removed
-        pass
-
-    def test_parse_check_prefix_abbreviations(self, mocker):
-        """Test parsing check command - only single-letter alias 'c' is supported at argparse level."""
-        # Prefix matching like 'ch', 'che', 'chec' happens in resolve_command(), not at argparse level
-        # argparse only recognizes explicit aliases, so these tests are removed
-        pass
-
-    def test_parse_build_prefix_abbreviations(self, mocker):
-        """Test parsing build command - only single-letter alias 'b' is supported at argparse level."""
-        # Prefix matching like 'bu', 'bui', 'buil' happens in resolve_command(), not at argparse level
-        # argparse only recognizes explicit aliases, so these tests are removed
-        pass
-
-    def test_parse_list_prefix_abbreviations(self, mocker):
-        """Test parsing list command - ls doesn't support prefix abbreviations since it's only 2 chars."""
-        # ls is only 2 characters, so no valid prefix abbreviations beyond the single-letter 'l' alias
-        # This test is removed since 'li' and 'lis' are not valid prefixes for 'ls'
-        pass
 
     def test_parse_extract_prefix_abbreviations(self, mocker):
         """Test parsing extract command - any unique prefix is supported."""
@@ -364,16 +219,50 @@ class TestConfiguration:
 
     def test_get_config_from_args(self, mocker):
         """Test getting configuration from arguments."""
-        args = mocker.MagicMock()
-        args.verbose = True
+        # Clean up any environment variables that might have mock values
+        env_vars = [
+            "SQUISH_MOUNT_BASE",
+            "SQUISH_TEMP_DIR",
+            "SQUISH_AUTO_CLEANUP",
+            "SQUISH_VERBOSE",
+            "SQUISH_COMPRESSION",
+            "SQUISH_BLOCK_SIZE",
+            "SQUISH_PROCESSORS",
+            "SQUISH_XATTR_MODE",
+            "SQUISH_EXCLUDE",
+        ]
+        for var in env_vars:
+            if var in os.environ:
+                del os.environ[var]
+
+        # Create a real args object using parse_args
+        mocker.patch("sys.argv", ["squish", "-v", "mount", "test.sqs"])
+        args = parse_args()
 
         config = get_config_from_args(args)
         assert config.verbose is True
 
     def test_get_config_default(self, mocker):
         """Test getting configuration with default values."""
-        args = mocker.MagicMock()
-        args.verbose = False
+        # Clean up any environment variables that might have mock values
+        env_vars = [
+            "SQUISH_MOUNT_BASE",
+            "SQUISH_TEMP_DIR",
+            "SQUISH_AUTO_CLEANUP",
+            "SQUISH_VERBOSE",
+            "SQUISH_COMPRESSION",
+            "SQUISH_BLOCK_SIZE",
+            "SQUISH_PROCESSORS",
+            "SQUISH_XATTR_MODE",
+            "SQUISH_EXCLUDE",
+        ]
+        for var in env_vars:
+            if var in os.environ:
+                del os.environ[var]
+
+        # Create a real args object using parse_args
+        mocker.patch("sys.argv", ["squish", "mount", "test.sqs"])
+        args = parse_args()
 
         config = get_config_from_args(args)
         assert config.verbose is False
@@ -664,6 +553,12 @@ class TestMainFunction:
         mock_args.file = "test.sqs"
         mock_args.mount_point = None
         mock_args.verbose = False
+        # Set other attributes to None to avoid mock issues
+        mock_args.compression = None
+        mock_args.block_size = None
+        mock_args.processors = None
+        mock_args.exclude = None
+        mock_args.xattr_mode = None
         mock_parse.return_value = mock_args
 
         # Mock manager
@@ -698,6 +593,7 @@ class TestMainFunction:
         mock_args.block_size = "1M"
         mock_args.processors = None
         mock_args.verbose = False
+        mock_args.xattr_mode = None
         mock_parse.return_value = mock_args
 
         # Mock manager
@@ -726,6 +622,11 @@ class TestMainFunction:
         mock_args.file = "test.sqs"
         mock_args.mount_point = None
         mock_args.verbose = False
+        mock_args.compression = None
+        mock_args.block_size = None
+        mock_args.processors = None
+        mock_args.exclude = None
+        mock_args.xattr_mode = None
         mock_parse.return_value = mock_args
 
         # Mock manager
@@ -752,6 +653,11 @@ class TestMainFunction:
         mock_args.command = "check"
         mock_args.file = "test.sqs"
         mock_args.verbose = False
+        mock_args.compression = None
+        mock_args.block_size = None
+        mock_args.processors = None
+        mock_args.exclude = None
+        mock_args.xattr_mode = None
         mock_parse.return_value = mock_args
 
         # Mock manager
@@ -778,6 +684,11 @@ class TestMainFunction:
         mock_args.command = "ls"
         mock_args.archive = "archive.sqsh"
         mock_args.verbose = False
+        mock_args.compression = None
+        mock_args.block_size = None
+        mock_args.processors = None
+        mock_args.exclude = None
+        mock_args.xattr_mode = None
         mock_parse.return_value = mock_args
 
         # Mock manager

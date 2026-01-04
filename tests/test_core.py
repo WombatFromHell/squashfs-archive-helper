@@ -18,7 +18,7 @@ class TestSquashFSManagerInitialization:
     def test_init_with_default_config(self, mocker):
         """Test initialization with default configuration."""
         # Mock dependencies to avoid actual system calls
-        mocker.patch("squish.dependencies.check_all_dependencies")
+        mocker.patch("squish.core.check_all_dependencies")
 
         manager = SquashFSManager()
         assert isinstance(manager.config, SquishFSConfig)
@@ -27,7 +27,7 @@ class TestSquashFSManagerInitialization:
     def test_init_with_custom_config(self, mocker):
         """Test initialization with custom configuration."""
         # Mock dependencies to avoid actual system calls
-        mocker.patch("squish.dependencies.check_all_dependencies")
+        mocker.patch("squish.core.check_all_dependencies")
 
         custom_config = SquishFSConfig(mount_base="custom_mounts")
         manager = SquashFSManager(custom_config)
@@ -67,7 +67,7 @@ class TestSquashFSManagerFunctionality:
     def test_mount_method(self, mocker):
         """Test the mount method delegates to mount_manager."""
         # Mock dependencies
-        mocker.patch("squish.dependencies.check_all_dependencies")
+        mocker.patch("squish.core.check_all_dependencies")
         mock_mount_manager = mocker.patch("squish.core.MountManager")
         mock_instance = mocker.MagicMock()
         mock_mount_manager.return_value = mock_instance
@@ -84,7 +84,7 @@ class TestSquashFSManagerFunctionality:
     def test_unmount_method(self, mocker):
         """Test the unmount method delegates to mount_manager."""
         # Mock dependencies
-        mocker.patch("squish.dependencies.check_all_dependencies")
+        mocker.patch("squish.core.check_all_dependencies")
         mock_mount_manager = mocker.patch("squish.core.MountManager")
         mock_instance = mocker.MagicMock()
         mock_mount_manager.return_value = mock_instance
@@ -101,7 +101,7 @@ class TestSquashFSManagerFunctionality:
     def test_verify_checksum_method(self, mocker):
         """Test the verify_checksum method delegates to checksum_manager."""
         # Mock dependencies
-        mocker.patch("squish.dependencies.check_all_dependencies")
+        mocker.patch("squish.core.check_all_dependencies")
         mock_checksum_manager = mocker.patch("squish.core.ChecksumManager")
         mock_instance = mocker.MagicMock()
         mock_checksum_manager.return_value = mock_instance
@@ -118,7 +118,7 @@ class TestSquashFSManagerFunctionality:
     def test_build_squashfs_method(self, mocker):
         """Test the build_squashfs method delegates to build_manager."""
         # Mock dependencies
-        mocker.patch("squish.dependencies.check_all_dependencies")
+        mocker.patch("squish.core.check_all_dependencies")
         mock_build_manager = mocker.patch("squish.core.BuildManager")
         mock_instance = mocker.MagicMock()
         mock_build_manager.return_value = mock_instance
@@ -155,7 +155,7 @@ class TestSquashFSManagerFunctionality:
     def test_list_squashfs_method(self, mocker):
         """Test the list_squashfs method delegates to list_manager."""
         # Mock dependencies
-        mocker.patch("squish.dependencies.check_all_dependencies")
+        mocker.patch("squish.core.check_all_dependencies")
         mock_list_manager = mocker.patch("squish.core.ListManager")
         mock_instance = mocker.MagicMock()
         mock_list_manager.return_value = mock_instance

@@ -5,11 +5,16 @@ This module tests the custom exception classes.
 """
 
 from squish.errors import (
+    BuildCancelledError,
+    BuildError,
     CommandExecutionError,
     ConfigError,
     DependencyError,
+    ErrorHandler,
+    ExtractError,
     MountError,
     MountPointError,
+    OperationResult,
     Result,
     SquashFSError,
     UnmountError,
@@ -218,3 +223,205 @@ class TestResultClass:
         result = Result.err(ValueError("original"))
         transformed = result.map_err(lambda e: RuntimeError(str(e) + " wrapped"))
         assert transformed.is_err()
+
+
+class TestOperationResult:
+    """Test the OperationResult class."""
+
+    def test_operation_result_success(self):
+        """Test creating a successful operation result."""
+        result = OperationResult.success()
+        assert result.is_success()
+        assert not result.is_failure()
+        assert result.error is None
+        assert result.error_type is None
+        assert not result.can_retry
+        assert result.recovery_suggestion is None
+
+    def test_operation_result_failure(self):
+        """Test creating a failed operation result."""
+        error = ValueError("test error")
+        result = OperationResult.failure(
+            error,
+            error_type="validation_error",
+            can_retry=True,
+            recovery_suggestion="Check input parameters",
+        )
+        assert result.is_failure()
+        assert not result.is_success()
+        assert result.error == error
+        assert result.error_type == "validation_error"
+        assert result.can_retry
+        assert result.recovery_suggestion == "Check input parameters"
+
+    def test_operation_result_get_error_message(self):
+        """Test getting error message from operation result."""
+        error = RuntimeError("operation failed")
+        result = OperationResult.failure(error)
+        assert result.get_error_message() == "operation failed"
+
+    def test_operation_result_get_error_message_no_error(self):
+        """Test getting error message when no error is present."""
+        result = OperationResult.success()
+        assert result.get_error_message() == "Unknown error"
+
+    def test_operation_result_get_error_details(self):
+        """Test getting detailed error information."""
+        error = IOError("file not found")
+        result = OperationResult.failure(
+            error,
+            error_type="file_system_error",
+            can_retry=True,
+            recovery_suggestion="Verify file paths",
+        )
+        details = result.get_error_details()
+        assert details["error_type"] == "file_system_error"
+        assert details["error_message"] == "file not found"
+        assert details["can_retry"] is True
+        assert details["recovery_suggestion"] == "Verify file paths"
+
+
+class TestErrorHandler:
+    """Test the ErrorHandler class."""
+
+    def test_error_handler_handle_error(self, mocker):
+        """Test handling an error with classification and recovery."""
+        mock_logger = mocker.MagicMock()
+        handler = ErrorHandler(mock_logger)
+
+        error = DependencyError("missing dependency")
+        result = handler.handle_error(error, "build operation")
+
+        assert result.is_failure()
+        assert result.error == error
+        assert result.error_type == "dependency_error"
+        assert result.can_retry
+        assert (
+            result.recovery_suggestion
+            == "Please install the required dependency: missing dependency"
+        )
+
+        # Verify logging calls
+        mock_logger.log_error.assert_called()
+
+    def test_error_handler_classify_errors(self, mocker):
+        """Test error classification for different error types."""
+        mock_logger = mocker.MagicMock()
+        handler = ErrorHandler(mock_logger)
+
+        # Test various error types
+        test_cases = [
+            (DependencyError("missing"), "dependency_error"),
+            (CommandExecutionError("cmd", 1), "command_execution_error"),
+            (BuildError("build failed"), "operation_error"),
+            (ExtractError("extract failed"), "operation_error"),
+            (BuildCancelledError("cancelled"), "cancellation_error"),
+            (FileNotFoundError("not found"), "file_system_error"),
+            (ValueError("invalid"), "validation_error"),
+            (RuntimeError("unknown"), "unknown_error"),
+        ]
+
+        for error, expected_type in test_cases:
+            result = handler._classify_error(error)
+            assert result == expected_type
+
+    def test_error_handler_get_recovery_info(self, mocker):
+        """Test getting recovery information for different error types."""
+        mock_logger = mocker.MagicMock()
+        handler = ErrorHandler(mock_logger)
+
+        # Test various error types and their recovery info
+        test_cases = [
+            (
+                DependencyError("missing"),
+                (True, "Please install the required dependency: missing"),
+            ),
+            (
+                CommandExecutionError("cmd", 1),
+                (False, "Check command execution permissions and try again"),
+            ),
+            (
+                BuildError("build failed"),
+                (True, "Check source files and try the operation again"),
+            ),
+            (
+                MountError("mount failed"),
+                (False, "Check mount point permissions and filesystem state"),
+            ),
+            (
+                FileNotFoundError("not found"),
+                (True, "Verify file paths and permissions"),
+            ),
+            (
+                ValueError("invalid"),
+                (False, "Check input parameters and configuration"),
+            ),
+            (RuntimeError("unknown"), (False, None)),
+        ]
+
+        for error, expected_recovery in test_cases:
+            result = handler._get_recovery_info(error, "test context")
+            assert result == expected_recovery
+
+    def test_error_handler_handle_success(self, mocker):
+        """Test handling a successful operation."""
+        mock_logger = mocker.MagicMock()
+        handler = ErrorHandler(mock_logger)
+
+        result = handler.handle_success("test operation")
+        assert result.is_success()
+
+        # Verify success logging
+        mock_logger.log_success.assert_called_with(
+            "test operation completed successfully"
+        )
+
+
+class TestErrorCoverageGaps:
+    """Test specific coverage gaps in the errors module."""
+
+    def test_operation_result_edge_cases(self):
+        """Test OperationResult edge cases."""
+        # Test with None error
+        result = OperationResult.failure(None, "unknown_error")  # type: ignore
+        assert result.is_failure()
+        assert result.error is None
+        assert result.get_error_message() == "Unknown error"
+
+        # Test with empty recovery suggestion
+        result = OperationResult.failure(
+            ValueError("test"), "validation_error", recovery_suggestion=""
+        )
+        details = result.get_error_details()
+        assert details["recovery_suggestion"] == ""
+
+    def test_error_handler_edge_cases(self, mocker):
+        """Test ErrorHandler edge cases."""
+        mock_logger = mocker.MagicMock()
+        handler = ErrorHandler(mock_logger)
+
+        # Test with None error
+        result = handler.handle_error(None, "test context")  # type: ignore
+        assert result.is_failure()
+        assert result.error is None
+        assert result.get_error_message() == "Unknown error"
+
+    def test_result_comprehensive_coverage(self):
+        """Test comprehensive Result class coverage."""
+        # Test all Result methods
+        success_result = Result.ok(42)
+        assert success_result.is_ok()
+        assert not success_result.is_err()
+        assert success_result.unwrap() == 42
+        assert success_result.unwrap_or(0) == 42
+
+        error_result = Result.err(ValueError("test"))
+        assert error_result.is_err()
+        assert not error_result.is_ok()
+
+        # Test mapping functions
+        mapped_success = success_result.map(lambda x: x * 2)
+        assert mapped_success.unwrap() == 84
+
+        mapped_error = error_result.map_err(lambda e: RuntimeError(str(e)))
+        assert mapped_error.is_err()

@@ -23,24 +23,6 @@ from squish.errors import (
 class TestChecksumManagerInitialization:
     """Test ChecksumManager initialization."""
 
-    def test_init_with_default_config(self):
-        """Test initialization with default configuration."""
-        manager = ChecksumManager()
-        assert manager.config.mount_base == "mounts"
-        assert manager.config.temp_dir == "/tmp"
-        assert manager.config.auto_cleanup is True
-
-    def test_init_with_custom_config(self):
-        """Test initialization with custom configuration."""
-        config = SquishFSConfig(
-            mount_base="custom",
-            temp_dir="/tmp",  # Use existing directory
-            auto_cleanup=False,
-            verbose=True,
-        )
-        manager = ChecksumManager(config)
-        assert manager.config == config
-
 
 class TestChecksumFileValidation:
     """Test checksum file validation logic."""

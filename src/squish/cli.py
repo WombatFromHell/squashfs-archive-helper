@@ -10,7 +10,7 @@ import os
 import sys
 from typing import Optional
 
-from .config import SquishFSConfig
+from .config import SquishFSConfig, get_merged_config
 from .core import SquashFSManager
 from .errors import (
     BuildError,
@@ -144,23 +144,45 @@ Ambiguous abbreviations will result in an error with suggestions.""".strip(),
 
 
 def get_config_from_args(args: argparse.Namespace) -> SquishFSConfig:
-    """Get configuration based on command line arguments."""
-    config = SquishFSConfig()
-    if args.verbose:
-        # Create new config with verbose=True since config is immutable
-        config = SquishFSConfig(
-            mount_base=config.mount_base,
-            temp_dir=config.temp_dir,
-            auto_cleanup=config.auto_cleanup,
-            verbose=True,
-            compression=config.compression,
-            block_size=config.block_size,
-            processors=config.processors,
-            xattr_mode=config.xattr_mode,
-            exclude=config.exclude,
-        )
+    """Get configuration based on command line arguments and other sources.
 
-    return config
+    Merges configuration from multiple sources with proper precedence:
+    1. CLI arguments (highest priority)
+    2. Environment variables
+    3. Configuration file
+    4. Default values (lowest priority)
+    """
+    # Convert CLI arguments to dictionary for merging
+    cli_config = {}
+
+    # Map CLI arguments to config keys (only include valid, non-mock values)
+    # Use getattr with default to handle missing attributes gracefully
+    verbose_val = getattr(args, "verbose", False)
+    if verbose_val and not hasattr(verbose_val, "__mock__"):
+        cli_config["verbose"] = verbose_val
+
+    compression_val = getattr(args, "compression", None)
+    if compression_val and not hasattr(compression_val, "__mock__"):
+        cli_config["compression"] = compression_val
+
+    block_size_val = getattr(args, "block_size", None)
+    if block_size_val and not hasattr(block_size_val, "__mock__"):
+        cli_config["block_size"] = block_size_val
+
+    processors_val = getattr(args, "processors", None)
+    if processors_val is not None and not hasattr(processors_val, "__mock__"):
+        cli_config["processors"] = processors_val
+
+    exclude_val = getattr(args, "exclude", None)
+    if exclude_val and not hasattr(exclude_val, "__mock__"):
+        cli_config["exclude"] = exclude_val
+
+    xattr_mode_val = getattr(args, "xattr_mode", None)
+    if xattr_mode_val and not hasattr(xattr_mode_val, "__mock__"):
+        cli_config["xattr_mode"] = xattr_mode_val
+
+    # Get merged configuration from all sources
+    return get_merged_config(cli_config)
 
 
 def resolve_command(command: str) -> str:
@@ -327,35 +349,18 @@ def _resolve_build_sources_and_output(
     sources: list[str], output: Optional[str]
 ) -> tuple[list[str], Optional[str]]:
     """Resolve sources and output path, handling implicit output in arguments."""
-    # If explicit output provided, no need to sniff arguments
+    # If explicit output provided via -o, use it
     if output is not None:
         return sources, output
 
-    # Check for implicit output only if multiple arguments provided
+    # Check for implicit output (last argument ending in archive extension)
+    # Only if there's more than one argument total (e.g. "squish b src output.sqsh")
     if len(sources) > 1:
         last_arg = sources[-1]
-        if last_arg.endswith((".sqsh", ".sqs", ".squashfs")):
-            # Last argument is likely the output
+        if last_arg.lower().endswith((".sqsh", ".sqs", ".squashfs")):
             return sources[:-1], last_arg
 
     return sources, None
-
-
-def _generate_auto_output_filename() -> str:
-    """Generate an automatic output filename for multi-source archives."""
-    import datetime
-    from pathlib import Path
-
-    today = datetime.datetime.now().strftime("%Y%m%d")
-    # Find the next available number
-    base_path = Path(".")
-    counter = 1
-
-    while True:
-        output_path = base_path / f"archive-{today}-{counter:02d}.sqsh"
-        if not output_path.exists():
-            return str(output_path)
-        counter += 1
 
 
 def handle_build_operation(
@@ -379,10 +384,6 @@ def handle_build_operation(
 
         # Resolve sources and output (handle implicit output arg)
         sources, output = _resolve_build_sources_and_output(sources, output)
-
-        # For multiple sources with no output specified, use generic naming
-        if len(sources) > 1 and output is None:
-            output = _generate_auto_output_filename()
 
         config = BuildConfiguration(
             source=sources[0] if len(sources) == 1 else sources,

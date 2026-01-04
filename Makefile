@@ -28,7 +28,7 @@ install: $(OUT)
 	echo "Installed servicemenu to $$REAL_HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"
 
 test:
-	uv run pytest -xvs --cov=src --cov-report=term-missing --cov-branch --tb=short
+	uv run pytest -v --cov=src --cov-report=term-missing --cov-branch --tb=short
 
 lint:
 	ruff check ./src ./tests; \
@@ -49,12 +49,13 @@ radon:
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +; \
 	rm -rf \
-		$(BUILD_DIR) \
-		.pytest_cache \
-		.ruff_cache \
-		.coverage \
-		/tmp/tmp*.mounted
+	$(BUILD_DIR) \
+	.pytest_cache \
+	.ruff_cache \
+	.coverage \
+	/tmp/tmp*.mounted
 
 all: clean build install
 
-.PHONY: all clean install build test lint format radon
+.PHONY: all clean install build test prettier quality lint format radon
+.SILENT: all clean install build test prettier quality lint format radon

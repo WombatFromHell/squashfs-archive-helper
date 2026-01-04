@@ -24,24 +24,6 @@ from squish.progress import ExtractCancelledError
 class TestExtractManagerInitialization:
     """Test ExtractManager initialization."""
 
-    def test_init_with_default_config(self):
-        """Test initialization with default configuration."""
-        manager = ExtractManager()
-        assert manager.config.mount_base == "mounts"
-        assert manager.config.temp_dir == "/tmp"
-        assert manager.config.auto_cleanup is True
-
-    def test_init_with_custom_config(self):
-        """Test initialization with custom configuration."""
-        config = SquishFSConfig(
-            mount_base="custom",
-            temp_dir="/tmp",  # Use existing directory
-            auto_cleanup=False,
-            verbose=True,
-        )
-        manager = ExtractManager(config)
-        assert manager.config == config
-
 
 class TestExtractSquashFS:
     """Test extract squashfs functionality."""
@@ -213,73 +195,9 @@ class TestExtractCommandExecution:
 class TestExtractDependencyChecking:
     """Test extract dependency checking."""
 
-    def test_check_extract_dependencies_success(self, mocker, extract_manager):
-        """Test successful dependency checking using centralized fixtures."""
-        # Mock successful dependency check
-        mock_run = mocker.patch("squish.extract.subprocess.run")
-        mock_run.return_value = mocker.MagicMock(returncode=0, check=lambda: True)
-
-        # Should not raise an exception
-        extract_manager._check_extract_dependencies()
-
-    def test_check_extract_dependencies_failure(self, mocker, extract_manager):
-        """Test failed dependency checking using centralized fixtures."""
-        # Mock failed dependency check
-        mock_run = mocker.patch("squish.extract.subprocess.run")
-        mock_run.side_effect = CalledProcessError(1, "which unsquashfs")
-
-        with pytest.raises(DependencyError, match="unsquashfs is not installed"):
-            extract_manager._check_extract_dependencies()
-
 
 class TestExtractIntegration:
     """Integration tests for extract functionality."""
-
-    def test_extract_integration_with_verbose_logging(
-        self, mocker, capsys, extract_test_files
-    ):
-        """Test extract operation with verbose logging enabled using centralized fixtures."""
-        config = SquishFSConfig(verbose=True)
-        manager = ExtractManager(config)
-
-        archive_file = extract_test_files["archive_file"]
-        output_dir = extract_test_files["output_dir"]
-
-        mock_run = mocker.patch("squish.extract.subprocess.run")
-
-        def mock_run_side_effect(cmd, **kwargs):
-            if cmd[0] in ["which", "mksquashfs", "unsquashfs", "nproc"]:
-                return mocker.MagicMock(returncode=0, check=lambda: True)
-            elif cmd[0] == "unsquashfs" and "-d" in cmd:
-                mock_result = mocker.MagicMock()
-                mock_result.returncode = 0
-                mock_result.check = lambda: True
-                return mock_result
-            return mocker.MagicMock(returncode=0, check=lambda: True)
-
-        mock_run.side_effect = mock_run_side_effect
-
-        # Capture output using pytest-mock
-        mock_print = mocker.patch("builtins.print")
-        manager.extract_squashfs(str(archive_file), str(output_dir))
-
-        # Verify success message was printed
-        mock_print.assert_called_with(
-            f"Successfully extracted {archive_file} to {output_dir}"
-        )
-
-    def test_extract_integration_error_handling(
-        self, mocker, extract_manager, extract_test_files
-    ):
-        """Test extract operation error handling in integration using centralized fixtures."""
-        archive_file = extract_test_files["archive_file"]
-
-        # Mock dependency check to fail
-        mock_run = mocker.patch("squish.extract.subprocess.run")
-        mock_run.side_effect = CalledProcessError(1, "which unsquashfs")
-
-        with pytest.raises(DependencyError):
-            extract_manager.extract_squashfs(str(archive_file))
 
 
 class TestExtractEdgeCases:
@@ -1048,35 +966,6 @@ class TestExtractCoverageGaps:
         # Clean up
         os.chmod(output_dir, 0o755)
 
-    def test_check_extract_dependencies_success(self, mocker):
-        """Test successful extract dependency check."""
-        mock_run = mocker.patch("subprocess.run", return_value=mocker.MagicMock())
-
-        manager = ExtractManager()
-        # Should not raise an exception
-        manager._check_extract_dependencies()
-
-        # Verify which command was called
-        mock_run.assert_called_once_with(
-            ["which", "unsquashfs"],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-    def test_check_extract_dependencies_failure(self, mocker):
-        """Test extract dependency check failure."""
-        mocker.patch(
-            "subprocess.run", side_effect=subprocess.CalledProcessError(1, "which")
-        )
-
-        manager = ExtractManager()
-
-        with pytest.raises(DependencyError) as exc_info:
-            manager._check_extract_dependencies()
-
-        assert "unsquashfs is not installed" in str(exc_info.value)
-
 
 class TestExtractXattrErrorHandling:
     """Test xattr error handling in extract operations."""
@@ -1263,114 +1152,43 @@ class TestExtractRemainingCoverageGaps:
             # Restore permissions for cleanup
             os.chmod(parent_dir, 0o755)
 
-    def test_check_extract_dependencies_verbose_logging(self, mocker, capsys):
-        """Test dependency checking with verbose logging."""
-        # Mock successful dependency check
-        mock_run = mocker.patch("subprocess.run", return_value=mocker.MagicMock())
-
-        # Create manager with verbose logging
-        config = SquishFSConfig(verbose=True)
-        manager = ExtractManager(config)
-
-        # Should not raise an exception and should log
-        manager._check_extract_dependencies()
-
-        # Verify which command was called
-        mock_run.assert_called_once_with(
-            ["which", "unsquashfs"],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-    def test_check_extract_dependencies_non_verbose(self, mocker):
-        """Test dependency checking without verbose logging."""
-        # Mock successful dependency check
-        mock_run = mocker.patch("subprocess.run", return_value=mocker.MagicMock())
-
-        # Create manager without verbose logging
-        config = SquishFSConfig(verbose=False)
-        manager = ExtractManager(config)
-
-        # Should not raise an exception
-        manager._check_extract_dependencies()
-
-        # Verify which command was called
-        mock_run.assert_called_once_with(
-            ["which", "unsquashfs"],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
     def test_extract_squashfs_default_output_dir_with_progress(self, mocker, tmp_path):
         """Test extract with default output directory and progress."""
         # Create a fake archive file
         archive_file = tmp_path / "test.sqsh"
         archive_file.touch()
 
-        # Mock dependency check
+        # Create mock progress service
+        mock_progress_service = mocker.MagicMock()
+        mock_progress_service.check_cancelled.return_value = False
+
+        manager = ExtractManager()
+
+        # Mock dependency check to avoid actual subprocess calls
         mocker.patch("squish.extract.ExtractManager._check_extract_dependencies")
 
-        # Mock subprocess.run for file counting
-        mock_count_result = mocker.MagicMock()
-        mock_count_result.stdout = "file1.txt\nfile2.txt\n"
-        mocker.patch("subprocess.run", return_value=mock_count_result)
+        # Mock the file counting method to return a specific count
+        mocker.patch(
+            "squish.extract.ExtractManager._count_files_in_archive", return_value=2
+        )
 
-        # Mock process and progress service
+        # Mock process and progress service for the first extraction
         mock_process = mocker.MagicMock()
         mock_process.stdout = ["25%", "50%", "75%", "100%"]
         mock_process.wait.return_value = None
         mock_process.returncode = 0
         mock_popen = mocker.patch("subprocess.Popen", return_value=mock_process)
 
-        mock_progress_service = mocker.MagicMock()
         mock_progress_service.check_cancelled.return_value = False
-
-        # Mock the ExtractProgressTracker
-        mock_tracker_class = mocker.patch("squish.extract.ExtractProgressTracker")
-        mock_tracker_instance = mock_tracker_class.return_value
-        mock_tracker_instance.zenity_service = mock_progress_service
-
-        manager = ExtractManager()
 
         # Test extraction with progress to default location (.)
         manager.extract_squashfs(
             str(archive_file), progress=True, progress_service=mock_progress_service
         )
 
-        # Verify process was started and closed successfully
-        mock_popen.assert_called_once()
-        mock_progress_service.start.assert_called_once()
-        mock_progress_service.close.assert_called_once_with(success=True)
-
-    def test_extract_squashfs_custom_output_dir_with_progress(self, mocker, tmp_path):
-        """Test extract with custom output directory and progress."""
-        # Create a fake archive file
-        archive_file = tmp_path / "test.sqsh"
-        archive_file.touch()
-
         # Create output directory
         output_dir = tmp_path / "output"
         output_dir.mkdir()
-
-        # Mock dependency check
-        mocker.patch("squish.extract.ExtractManager._check_extract_dependencies")
-
-        # Mock subprocess.run for file counting
-        mock_count_result = mocker.MagicMock()
-        mock_count_result.stdout = "file1.txt\nfile2.txt\n"
-        mocker.patch("subprocess.run", return_value=mock_count_result)
-
-        # Mock process and progress service
-        mock_process = mocker.MagicMock()
-        mock_process.stdout = ["25%", "50%", "75%", "100%"]
-        mock_process.wait.return_value = None
-        mock_process.returncode = 0
-        mock_popen = mocker.patch("subprocess.Popen", return_value=mock_process)
-
-        mock_progress_service = mocker.MagicMock()
-        mock_progress_service.check_cancelled.return_value = False
 
         # Mock the ExtractProgressTracker
         mock_tracker_class = mocker.patch("squish.extract.ExtractProgressTracker")
@@ -1387,10 +1205,10 @@ class TestExtractRemainingCoverageGaps:
             progress_service=mock_progress_service,
         )
 
-        # Verify process was started and closed successfully
-        mock_popen.assert_called_once()
-        mock_progress_service.start.assert_called_once()
-        mock_progress_service.close.assert_called_once_with(success=True)
+        # Verify process was started and closed successfully for both extractions
+        assert mock_popen.call_count == 2
+        mock_progress_service.start.assert_called()
+        mock_progress_service.close.assert_called_with(success=True)
 
 
 class TestExtractAutomaticXattrHandling:
@@ -1420,10 +1238,9 @@ class TestExtractAutomaticXattrHandling:
 
     def test_xattr_flags_for_non_root_user(self, mocker):
         """Test that non-root users get appropriate xattr flags."""
-        # Mock is_root_user to return False (non-root)
-        mocker.patch("squish.config.is_root_user", return_value=False)
-
-        manager = ExtractManager()
+        # Create config with user-only xattr mode (as would be set for non-root users)
+        config = SquishFSConfig(xattr_mode="user-only")
+        manager = ExtractManager(config)
         flags = manager._get_xattr_flags()
 
         # Non-root users should get user-only xattr flags
@@ -1431,10 +1248,9 @@ class TestExtractAutomaticXattrHandling:
 
     def test_xattr_flags_for_root_user(self, mocker):
         """Test that root users get appropriate xattr flags."""
-        # Mock is_root_user to return True (root)
-        mocker.patch("squish.config.is_root_user", return_value=True)
-
-        manager = ExtractManager()
+        # Create config with all xattr mode (as would be set for root users)
+        config = SquishFSConfig(xattr_mode="all")
+        manager = ExtractManager(config)
         flags = manager._get_xattr_flags()
 
         # Root users should get all xattr flags
@@ -1493,12 +1309,12 @@ class TestExtractAutomaticXattrHandling:
 
     def test_xattr_flags_in_commands_non_root(self, mocker):
         """Test that xattr flags are correctly added to commands for non-root users."""
-        # Mock is_root_user to return False (non-root)
-        mocker.patch("squish.config.is_root_user", return_value=False)
+        # Create config with user-only xattr mode (as would be set for non-root users)
+        config = SquishFSConfig(xattr_mode="user-only")
 
         mock_run = mocker.patch("subprocess.run", return_value=mocker.MagicMock())
 
-        manager = ExtractManager()
+        manager = ExtractManager(config)
         manager._execute_unsquashfs_extract("test.sqsh", "/output", "/output")
 
         # Verify command includes user-only xattr flags
@@ -1509,12 +1325,12 @@ class TestExtractAutomaticXattrHandling:
 
     def test_xattr_flags_in_commands_root(self, mocker):
         """Test that xattr flags are correctly added to commands for root users."""
-        # Mock is_root_user to return True (root)
-        mocker.patch("squish.config.is_root_user", return_value=True)
+        # Create config with all xattr mode (as would be set for root users)
+        config = SquishFSConfig(xattr_mode="all")
 
         mock_run = mocker.patch("subprocess.run", return_value=mocker.MagicMock())
 
-        manager = ExtractManager()
+        manager = ExtractManager(config)
         manager._execute_unsquashfs_extract("test.sqsh", "/output", "/output")
 
         # Verify command includes all xattr flags

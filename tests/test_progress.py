@@ -16,6 +16,7 @@ from squish.progress import (
     MksquashfsProgress,
     ProgressParseError,
     ProgressTracker,
+    UnifiedProgressParser,
     UnsquashfsProgress,
     ZenityProgressService,
     parse_mksquashfs_progress,
@@ -552,18 +553,35 @@ class TestProgressTracker:
 
     def test_process_output_line_with_progress(self, mocker):
         """Test processing output line with progress info."""
-        mock_service = mocker.MagicMock()
-        mock_service.check_cancelled.return_value = False  # Don't cancel
-        tracker = ProgressTracker(mock_service)
+        # Create a real ZenityProgressService with mocked process
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        mocker.patch("subprocess.Popen", return_value=mock_process)
+
+        service = ZenityProgressService()
+        service.start()
+
+        # Mock check_cancelled to return False
+        service.check_cancelled = mocker.MagicMock(return_value=False)
+
+        # Clear the mock calls from start() to only check progress update calls
+        mock_process.stdin.write.reset_mock()
+
+        tracker = ProgressTracker(service)
 
         line = "[=====] 10/100  50%"
         tracker.process_output_line(line)
 
-        # Should parse and update service
-        mock_service.update.assert_called_once()
-        progress_arg = mock_service.update.call_args[0][0]
-        assert progress_arg == MksquashfsProgress(10, 100, 50)
-        assert tracker._state.last_progress == progress_arg
+        # Should parse and update service via observer pattern
+        # Check that on_progress_update was called by verifying stdin writes
+        mock_process.stdin.write.assert_any_call("50\n")
+        mock_process.stdin.write.assert_any_call("# BUILD: 10/100 (50%)\n")
+
+        # Verify state was updated
+        assert tracker._state.last_progress is not None
+        assert tracker._state.last_progress.current_files == 10
+        assert tracker._state.last_progress.total_files == 100
+        assert tracker._state.last_progress.percentage == 50
 
     def test_process_output_line_without_progress(self, mocker):
         """Test processing output line without progress info."""
@@ -676,54 +694,117 @@ class TestExtractProgressTracker:
 
     def test_process_output_line_with_percentage(self, mocker):
         """Test processing percentage progress lines."""
-        mock_service = mocker.MagicMock()
-        mock_service.check_cancelled.return_value = False
-        tracker = ExtractProgressTracker(mock_service)
+        # Create a real ZenityProgressService with mocked process
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        mocker.patch("subprocess.Popen", return_value=mock_process)
+
+        service = ZenityProgressService()
+        service.start()
+
+        # Mock check_cancelled to return False
+        service.check_cancelled = mocker.MagicMock(return_value=False)
+
+        # Clear the mock calls from start() to only check progress update calls
+        mock_process.stdin.write.reset_mock()
+
+        tracker = ExtractProgressTracker(service)
         tracker.set_total_files(100)
+        # Set total_inodes in the parser for percentage parsing
+        tracker._parser.total_inodes = 100
 
         line = "50%"
         tracker.process_output_line(line)
 
-        # Should parse percentage and update service
+        # Should parse percentage and update service via observer pattern
+        # Check that on_progress_update was called by verifying stdin writes
+        mock_process.stdin.write.assert_any_call("50\n")
+        mock_process.stdin.write.assert_any_call("# EXTRACT: 50/100 (50%)\n")
+
+        # Verify state was updated
         assert tracker._state.last_progress is not None
         assert tracker._state.last_progress.percentage == 50
         assert tracker._state.last_progress.current_files == 50
         assert tracker._state.last_progress.total_files == 100
-        mock_service.update.assert_called_once()
 
     def test_process_output_line_with_created_files(self, mocker):
         """Test processing created files progress lines."""
-        mock_service = mocker.MagicMock()
-        mock_service.check_cancelled.return_value = False
-        tracker = ExtractProgressTracker(mock_service)
+        # Create a real ZenityProgressService with mocked process
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        mocker.patch("subprocess.Popen", return_value=mock_process)
+
+        service = ZenityProgressService()
+        service.start()
+
+        # Mock check_cancelled to return False
+        service.check_cancelled = mocker.MagicMock(return_value=False)
+
+        # Clear the mock calls from start() to only check progress update calls
+        mock_process.stdin.write.reset_mock()
+
+        tracker = ExtractProgressTracker(service)
         tracker.set_total_files(200)
+        # Set total_inodes in the parser for created files parsing
+        tracker._parser.total_inodes = 200
 
         line = "created 100 files"
         tracker.process_output_line(line)
 
-        # Should parse created files and update service
+        # Should parse created files and update service via observer pattern
+        # Check that on_progress_update was called by verifying stdin writes
+        mock_process.stdin.write.assert_any_call("50\n")
+        mock_process.stdin.write.assert_any_call("# EXTRACT: 100/200 (50%)\n")
+
+        # Verify state was updated
         assert tracker._state.last_progress is not None
         assert tracker._state.last_progress.current_files == 100
         assert tracker._state.last_progress.total_files == 200
         assert tracker._state.last_progress.percentage == 50
-        mock_service.update.assert_called_once()
 
     def test_process_output_line_with_inodes(self, mocker):
         """Test processing inodes progress lines."""
-        mock_service = mocker.MagicMock()
-        mock_service.check_cancelled.return_value = False
-        tracker = ExtractProgressTracker(mock_service)
+        # Create a real ZenityProgressService with mocked process
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        mocker.patch("subprocess.Popen", return_value=mock_process)
+
+        service = ZenityProgressService()
+        service.start()
+
+        # Mock check_cancelled to return False
+        service.check_cancelled = mocker.MagicMock(return_value=False)
+
+        # Clear the mock calls from start() to only check progress update calls
+        mock_process.stdin.write.reset_mock()
+
+        tracker = ExtractProgressTracker(service)
         tracker.set_total_files(100)
+        # Set total_inodes in the parser for inodes parsing
+        tracker._parser.total_inodes = 100
 
-        line = "50 inodes (100 blocks) to write"
-        tracker.process_output_line(line)
+        # First process the header line to set total_inodes
+        header_line = "50 inodes (100 blocks) to write"
+        tracker.process_output_line(header_line)
 
-        # Should parse inodes and update service
+        # Then process a progress line
+        progress_line = "25/100 25%"
+        tracker.process_output_line(progress_line)
+
+        # Should parse progress and update service via observer pattern
+        # Check that on_progress_update was called by verifying stdin writes
+        # Note: The parser uses total_inodes (50) from the header, not total_files (100)
+        mock_process.stdin.write.assert_any_call("25\n")
+        mock_process.stdin.write.assert_any_call("# EXTRACT: 25/50 (25%)\n")
+
+        # Verify state was updated
+        # Note: The parser uses total_inodes (50) from the header, not total_files (100)
         assert tracker._state.last_progress is not None
-        assert tracker._state.last_progress.current_files == 50
-        assert tracker._state.last_progress.total_files == 100
-        assert tracker._state.last_progress.percentage == 50
-        mock_service.update.assert_called_once()
+        assert tracker._state.last_progress.current_files == 25
+        assert (
+            tracker._state.last_progress.total_files == 50
+        )  # Uses total_inodes from header
+        assert tracker._state.last_progress.percentage == 25
 
     def test_process_output_line_without_total_files(self, mocker):
         """Test processing lines when total files is not set."""
@@ -931,6 +1012,248 @@ class TestIntegrationScenarios:
             "Build completed successfully" in record.message
             for record in caplog.records
         )
+
+
+class TestUnifiedProgressParser:
+    """Test the UnifiedProgressParser class."""
+
+    def test_unified_parser_initialization(self):
+        """Test parser initialization."""
+        parser = UnifiedProgressParser()
+        assert parser.total_inodes == 0
+        assert parser.operation_type is None
+
+    def test_unified_parser_parse_unsquashfs_inodes_header(self):
+        """Test parsing unsquashfs inodes header."""
+        parser = UnifiedProgressParser()
+
+        line = "5767 inodes (35882 blocks) to write"
+        result = parser.parse_unsquashfs_progress(line)
+
+        # Should return None (header line) but update total_inodes
+        assert result is None
+        assert parser.total_inodes == 5767
+
+    def test_unified_parser_parse_unsquashfs_progress_line(self):
+        """Test parsing unsquashfs progress line."""
+        parser = UnifiedProgressParser()
+
+        # First set total_inodes
+        parser.total_inodes = 1000
+
+        line = "123/1000 2%"
+        result = parser.parse_unsquashfs_progress(line)
+
+        assert result is not None
+        assert result.current_files == 123
+        assert result.total_files == 1000  # Should use stored total_inodes
+        assert result.percentage == 2
+
+    def test_unified_parser_parse_unsquashfs_progress_without_header(self):
+        """Test parsing unsquashfs progress line without header."""
+        parser = UnifiedProgressParser()
+
+        line = "123/1000 2%"
+        result = parser.parse_unsquashfs_progress(line)
+
+        assert result is not None
+        assert result.current_files == 123
+        assert result.total_files == 1000  # Should use total from line
+        assert result.percentage == 2
+
+    def test_unified_parser_parse_mksquashfs_percentage(self):
+        """Test parsing mksquashfs percentage."""
+        parser = UnifiedProgressParser()
+
+        line = "50%"
+        result = parser.parse_mksquashfs_progress(line, total_files=100)
+
+        assert result is not None
+        assert result.current_files == 50
+        assert result.total_files == 100
+        assert result.percentage == 50
+
+    def test_unified_parser_parse_mksquashfs_percentage_no_suffix(self):
+        """Test parsing mksquashfs percentage without % suffix."""
+        parser = UnifiedProgressParser()
+
+        line = "50"
+        result = parser.parse_mksquashfs_progress(line, total_files=100)
+
+        assert result is not None
+        assert result.current_files == 50
+        assert result.total_files == 100
+        assert result.percentage == 50
+
+    def test_unified_parser_parse_mksquashfs_no_total_files(self):
+        """Test parsing mksquashfs percentage without total files."""
+        parser = UnifiedProgressParser()
+
+        line = "50%"
+        result = parser.parse_mksquashfs_progress(line, total_files=0)
+
+        assert result is not None
+        assert result.current_files == 0  # Can't determine without total
+        assert result.total_files == 1  # Placeholder
+        assert result.percentage == 50
+
+    def test_unified_parser_parse_non_progress_lines(self):
+        """Test that non-progress lines return None."""
+        parser = UnifiedProgressParser()
+
+        lines = [
+            "Parallel mksquashfs: Using 16 processors",
+            "Creating 4.0 filesystem on test.sqsh",
+            "Filesystem size 1.23 Kbytes",
+            "",
+            "Exportable Squashfs 4.0 filesystem, zstd compressed",
+        ]
+
+        for line in lines:
+            assert parser.parse_mksquashfs_progress(line) is None
+            assert parser.parse_unsquashfs_progress(line) is None
+
+
+class TestZenityProgressServiceObserverPattern:
+    """Test ZenityProgressService with observer pattern methods."""
+
+    def test_zenity_service_on_progress_update(self, mocker):
+        """Test on_progress_update method."""
+        # Mock the process
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        mocker.patch("subprocess.Popen", return_value=mock_process)
+
+        service = ZenityProgressService()
+        service.start()
+
+        # Create ProgressInfo
+        from squish.observer import OperationType, ProgressInfo, ProgressState
+
+        progress = ProgressInfo(
+            operation_type=OperationType.BUILD,
+            state=ProgressState.IN_PROGRESS,
+            current=50,
+            total=100,
+            percentage=50,
+            message="Building: 50/100 files",
+        )
+
+        service.on_progress_update(progress)
+
+        # Should write percentage and status to stdin
+        mock_process.stdin.write.assert_any_call("50\n")
+        mock_process.stdin.write.assert_any_call("# BUILD: 50/100 (50%)\n")
+
+    def test_zenity_service_on_completion(self, mocker, caplog):
+        """Test on_completion method."""
+        # Mock the process
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        mocker.patch("subprocess.Popen", return_value=mock_process)
+
+        service = ZenityProgressService()
+        service.start()
+
+        # Create ProgressInfo
+        from squish.observer import OperationType, ProgressInfo, ProgressState
+
+        progress = ProgressInfo(
+            operation_type=OperationType.BUILD,
+            state=ProgressState.IN_PROGRESS,
+            current=100,
+            total=100,
+            percentage=100,
+            message="Building: 100/100 files",
+        )
+
+        with caplog.at_level(logging.INFO):
+            service.on_completion(progress, success=True)
+
+        # Should close the process and log completion
+        mock_process.stdin.write.assert_called_with("100\n")
+        assert any(
+            "BUILD completed successfully" in record.message
+            for record in caplog.records
+        )
+
+    def test_zenity_service_on_cancellation(self, mocker, caplog):
+        """Test on_cancellation method."""
+        # Mock the process
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        mocker.patch("subprocess.Popen", return_value=mock_process)
+
+        service = ZenityProgressService()
+        service.start()
+
+        # Create ProgressInfo
+        from squish.observer import OperationType, ProgressInfo, ProgressState
+
+        progress = ProgressInfo(
+            operation_type=OperationType.BUILD,
+            state=ProgressState.IN_PROGRESS,
+            current=50,
+            total=100,
+            percentage=50,
+            message="Building: 50/100 files",
+        )
+
+        service.on_cancellation(progress)
+
+        # Should close the process and log cancellation
+        assert service.process is None
+        assert any("BUILD was cancelled" in record.message for record in caplog.records)
+
+    def test_zenity_service_on_error(self, mocker, caplog):
+        """Test on_error method."""
+        # Mock the process
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        mocker.patch("subprocess.Popen", return_value=mock_process)
+
+        service = ZenityProgressService()
+        service.start()
+
+        # Create ProgressInfo
+        from squish.observer import OperationType, ProgressInfo, ProgressState
+
+        progress = ProgressInfo(
+            operation_type=OperationType.BUILD,
+            state=ProgressState.IN_PROGRESS,
+            current=50,
+            total=100,
+            percentage=50,
+            message="Building: 50/100 files",
+        )
+
+        error = Exception("Test error")
+        service.on_error(progress, error)
+
+        # Should close the process and log error
+        assert service.process is None
+        assert any(
+            "BUILD failed with error" in record.message for record in caplog.records
+        )
+
+    def test_zenity_service_start_operation(self, mocker):
+        """Test start_operation method."""
+        # Mock the process
+        mock_process = mocker.MagicMock()
+        mock_process.stdin = mocker.MagicMock()
+        mocker.patch("subprocess.Popen", return_value=mock_process)
+
+        service = ZenityProgressService()
+
+        from squish.observer import OperationType
+
+        service.start_operation(OperationType.BUILD, "Starting build...")
+
+        # Should start the process and set operation type
+        assert service._operation_type == OperationType.BUILD
+        # The start() method writes status text first, then percentage
+        mock_process.stdin.write.assert_any_call("# Starting build...\n")
+        mock_process.stdin.write.assert_any_call("0\n")
 
 
 class TestProgressCoverageGaps:

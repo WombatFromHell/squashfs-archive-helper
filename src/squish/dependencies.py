@@ -6,51 +6,54 @@ and command availability for various operations.
 """
 
 import platform
-import subprocess
 from typing import Optional
 
+from .command_executor import ICommandExecutor
 from .config import SquishFSConfig
 from .errors import DependencyError
+from .logging import get_logger
 
 
-def _check_single_command(cmd: str, config, logger) -> bool:
+def _check_single_command(cmd: str, executor: ICommandExecutor) -> bool:
     """Pure function to check a single command."""
     try:
-        subprocess.run(
+        executor.execute(
             ["which", cmd],
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
         return True
-    except subprocess.CalledProcessError:
+    except Exception:
         return False
 
 
-def _ensure_config_and_logger(config, logger):
-    """Ensure config and logger are initialized."""
+def _ensure_config_and_executor(config, executor):
+    """Ensure config and executor are initialized."""
     if config is None:
         from .config import SquishFSConfig
 
         config = SquishFSConfig()
 
-    if logger is None:
-        from .logging import get_logger
+    if executor is None:
+        from .command_executor import CommandExecutor
 
-        logger = get_logger(config.verbose)
+        executor = CommandExecutor(config)
 
-    return config, logger
+    return config, executor
 
 
 def check_commands(
-    commands: list[str], config: Optional[SquishFSConfig] = None, logger=None
+    commands: list[str],
+    config: Optional[SquishFSConfig] = None,
+    executor: Optional[ICommandExecutor] = None,
 ) -> None:
     """Check if required commands are available using functional pattern."""
-    config, logger = _ensure_config_and_logger(config, logger)
+    config, executor = _ensure_config_and_executor(config, executor)
+    logger = get_logger(config.verbose)
 
     # Use functional approach: find first missing command lazily
     missing_cmd = next(
-        (cmd for cmd in commands if not _check_single_command(cmd, config, logger)),
+        (cmd for cmd in commands if not _check_single_command(cmd, executor)),
         None,
     )
 
@@ -68,17 +71,17 @@ def check_commands(
 
 
 def check_linux_dependencies(
-    config: Optional[SquishFSConfig] = None, logger=None
+    config: Optional[SquishFSConfig] = None, executor: Optional[ICommandExecutor] = None
 ) -> None:
     """Check for Linux-specific dependencies."""
-    check_commands(["squashfuse", "fusermount", "sha256sum"], config, logger)
+    check_commands(["squashfuse", "fusermount", "sha256sum"], config, executor)
 
 
 def check_build_dependencies(
-    config: Optional[SquishFSConfig] = None, logger=None
+    config: Optional[SquishFSConfig] = None, executor: Optional[ICommandExecutor] = None
 ) -> None:
     """Check for build-specific dependencies."""
-    check_commands(["mksquashfs", "unsquashfs", "nproc"], config, logger)
+    check_commands(["mksquashfs", "unsquashfs", "nproc"], config, executor)
 
 
 def check_all_dependencies(
@@ -87,7 +90,7 @@ def check_all_dependencies(
     """Check system dependencies."""
     current_os = platform.system().lower()
     if current_os == "linux":
-        check_linux_dependencies(config, logger)
+        check_linux_dependencies(config)  # Remove logger parameter
     else:
         # Create a temporary logger if none provided
         if logger is None:

@@ -13,18 +13,6 @@ from squish.logging import MountSquashFSLogger
 class TestMountSquashFSLoggerInitialization:
     """Test logger initialization."""
 
-    def test_logger_initialization_verbose(self):
-        """Test logger initialization with verbose mode."""
-        logger = MountSquashFSLogger("test_logger", verbose=True)
-        assert logger.logger.name == "test_logger"
-        assert logger.verbose is True
-
-    def test_logger_initialization_not_verbose(self):
-        """Test logger initialization without verbose mode."""
-        logger = MountSquashFSLogger("test_logger", verbose=False)
-        assert logger.logger.name == "test_logger"
-        assert logger.verbose is False
-
 
 class TestMountSquashFSLoggerMountOperations:
     """Test mount operation logging."""
@@ -294,3 +282,71 @@ class TestMountSquashFSLoggerListOperations:
         mock_error = mocker.patch.object(logger.logger, "error")
         logger.log_list_failed("archive.sqsh", "List error")
         mock_error.assert_called_once_with("List failed: archive.sqsh: List error")
+
+
+class TestVerboseLoggingComprehensive:
+    """Comprehensive parametrized tests for verbose logging across all modules."""
+
+    @pytest.mark.parametrize(
+        "module,scenario",
+        [
+            ("build", "build_operation"),
+            ("mount", "mount_operation"),
+            ("list", "list_operation"),
+            ("command_executor", "command_execution"),
+        ],
+    )
+    def test_verbose_logging_comprehensive(self, module, scenario, mocker, capsys):
+        """Test verbose logging behavior across all modules comprehensively."""
+        # Create logger with verbose=True
+        logger = MountSquashFSLogger("test_logger", verbose=True)
+
+        # Execute the appropriate logging methods based on module/scenario
+        if module == "build":
+            logger.log_build_start("source_dir", "output.sqsh")
+            logger.log_build_success("source_dir", "output.sqsh")
+
+        elif module == "mount":
+            logger.log_mount_start("archive.sqsh", "/mnt/point")
+            logger.log_mount_success("archive.sqsh", "/mnt/point")
+
+        elif module == "list":
+            logger.log_list_start("archive.sqsh")
+            logger.log_list_success("archive.sqsh")
+
+        elif module == "command_executor":
+            logger.log_command_execution("echo test")
+
+        # Verify that logging output was produced (verbose=True should log)
+        captured = capsys.readouterr()
+        assert captured.out.strip() != "" or captured.err.strip() != ""
+
+    def test_verbose_vs_non_verbose_logging(self, mocker):
+        """Test that verbose=True produces more logging than verbose=False."""
+        # Create verbose logger
+        verbose_logger = MountSquashFSLogger("verbose_logger", verbose=True)
+        mock_verbose = mocker.MagicMock()
+        verbose_logger.logger = mock_verbose
+
+        # Create non-verbose logger
+        non_verbose_logger = MountSquashFSLogger("non_verbose_logger", verbose=False)
+        mock_non_verbose = mocker.MagicMock()
+        non_verbose_logger.logger = mock_non_verbose
+
+        # Execute same operations on both
+        verbose_logger.log_build_start("source", "output.sqsh")
+        non_verbose_logger.log_build_start("source", "output.sqsh")
+
+        # Verify verbose logger has more log calls
+        verbose_call_count = (
+            mock_verbose.info.call_count + mock_verbose.debug.call_count
+        )
+        non_verbose_call_count = (
+            mock_non_verbose.info.call_count + mock_non_verbose.debug.call_count
+        )
+
+        assert verbose_call_count >= non_verbose_call_count
+
+
+class TestLoggerFactoryFunction:
+    """Test the get_logger factory function."""

@@ -6,11 +6,17 @@ for the mount-squashfs functionality.
 """
 
 # Functional error handling patterns
-from typing import Any, Callable, Generic, TypeVar, Union
+from typing import Any, Callable, Generic, Optional, TypeVar, Union
 
 
 class SquashFSError(Exception):
     """Base exception for all mount-squashfs related errors."""
+
+    pass
+
+
+class BuildCancelledError(SquashFSError):
+    """Exception raised when build operation is cancelled by user."""
 
     pass
 
@@ -188,6 +194,126 @@ class Result(Generic[T, E]):
         if not self.success and self.error is not None:
             return Result.err(fn(self.error))
         return self  # type: ignore
+
+
+class OperationResult:
+    """Enhanced operation result with error classification and recovery support."""
+
+    def __init__(
+        self,
+        success: bool,
+        error: Optional[Exception] = None,
+        error_type: Optional[str] = None,
+        can_retry: bool = False,
+        recovery_suggestion: Optional[str] = None,
+    ):
+        self._success = success
+        self.error = error
+        self.error_type = error_type
+        self.can_retry = can_retry
+        self.recovery_suggestion = recovery_suggestion
+
+    @classmethod
+    def success(cls) -> "OperationResult":
+        """Create a successful operation result."""
+        return cls(True)
+
+    @classmethod
+    def failure(
+        cls,
+        error: Exception,
+        error_type: str = "unknown",
+        can_retry: bool = False,
+        recovery_suggestion: Optional[str] = None,
+    ) -> "OperationResult":
+        """Create a failed operation result."""
+        return cls(False, error, error_type, can_retry, recovery_suggestion)
+
+    def is_success(self) -> bool:
+        """Check if operation was successful."""
+        return self._success
+
+    def is_failure(self) -> bool:
+        """Check if operation failed."""
+        return not self._success
+
+    def get_error_message(self) -> str:
+        """Get the error message."""
+        if self.error:
+            return str(self.error)
+        return "Unknown error"
+
+    def get_error_details(self) -> dict:
+        """Get detailed error information."""
+        return {
+            "error_type": self.error_type,
+            "error_message": self.get_error_message(),
+            "can_retry": self.can_retry,
+            "recovery_suggestion": self.recovery_suggestion,
+        }
+
+
+class ErrorHandler:
+    """Centralized error handling with classification and recovery support."""
+
+    def __init__(self, logger):
+        self.logger = logger
+
+    def handle_error(self, error: Exception, context: str) -> OperationResult:
+        """Handle an error with classification and recovery suggestions."""
+        error_type = self._classify_error(error)
+        can_retry, recovery_suggestion = self._get_recovery_info(error, context)
+
+        # Log the error with context
+        self.logger.log_error(f"{context}: {error_type} - {str(error)}")
+
+        if recovery_suggestion:
+            self.logger.log_error(f"Recovery suggestion: {recovery_suggestion}")
+
+        return OperationResult.failure(
+            error, error_type, can_retry, recovery_suggestion
+        )
+
+    def _classify_error(self, error: Exception) -> str:
+        """Classify the error type."""
+        if isinstance(error, DependencyError):
+            return "dependency_error"
+        elif isinstance(error, CommandExecutionError):
+            return "command_execution_error"
+        elif isinstance(error, (BuildError, ExtractError, MountError, UnmountError)):
+            return "operation_error"
+        elif isinstance(error, (BuildCancelledError, ExtractCancelledError)):
+            return "cancellation_error"
+        elif isinstance(error, (FileNotFoundError, IOError)):
+            return "file_system_error"
+        elif isinstance(error, (ValueError, TypeError)):
+            return "validation_error"
+        else:
+            return "unknown_error"
+
+    def _get_recovery_info(
+        self, error: Exception, context: str
+    ) -> tuple[bool, Optional[str]]:
+        """Get recovery information for the error."""
+        if isinstance(error, DependencyError):
+            return True, f"Please install the required dependency: {error}"
+        elif isinstance(error, CommandExecutionError):
+            return False, "Check command execution permissions and try again"
+        elif isinstance(error, (BuildError, ExtractError)):
+            return True, "Check source files and try the operation again"
+        elif isinstance(error, (MountError, UnmountError)):
+            return False, "Check mount point permissions and filesystem state"
+        elif isinstance(error, (FileNotFoundError, IOError)):
+            return True, "Verify file paths and permissions"
+        elif isinstance(error, (ValueError, TypeError)):
+            return False, "Check input parameters and configuration"
+        else:
+            return False, None
+
+    def handle_success(self, context: str) -> OperationResult:
+        """Handle a successful operation."""
+        self.logger.log_success(f"{context} completed successfully")
+        return OperationResult.success()
 
 
 def safe_operation(fn, *args, **kwargs) -> "Result[Any, Exception]":

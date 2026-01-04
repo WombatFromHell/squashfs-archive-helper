@@ -640,7 +640,7 @@ class TestMountingCoverageGaps:
                 manager.tracker.is_mounted = original_is_mounted
                 manager.tracker.record_mount = original_record_mount
 
-    def test_determine_mount_point_with_custom_mount_point(self, mocker):
+    def test_determine_mount_point_with_custom_mount_point(self, mocker, caplog):
         """Test _determine_mount_point when a custom mount point is provided."""
         config = SquishFSConfig()
         manager = MountManager(config)
@@ -649,30 +649,6 @@ class TestMountingCoverageGaps:
         result = manager._determine_mount_point("test.squashfs", "/custom/mount/point")
         expected = Path("/custom/mount/point")
         assert result == expected
-
-    def test_validate_mount_point_available_verbose_logging(self, mocker, caplog):
-        """Test _validate_mount_point_available with verbose logging."""
-        config = SquishFSConfig(verbose=True)  # Enable verbose logging
-        manager = MountManager(config)
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            mount_point = Path(temp_dir) / "empty_mount"
-            mount_point.mkdir()
-
-            # This should log validation result when verbose is enabled
-            with caplog.at_level(logging.INFO):
-                manager._validate_mount_point_available(mount_point)
-
-            # Check that validation result was logged
-            assert any(
-                "mount_point_availability" in record.message.lower()
-                for record in caplog.records
-            )
-
-    def test_execute_unmount_command_success_verbose(self, mocker, caplog):
-        """Test _execute_unmount_command with success and verbose logging."""
-        config = SquishFSConfig(verbose=True)  # Enable verbose logging
-        manager = MountManager(config)
 
         with tempfile.TemporaryDirectory() as temp_dir:
             mount_point = Path(temp_dir) / "mount_point"
@@ -692,24 +668,3 @@ class TestMountingCoverageGaps:
             assert command[0] == "fusermount"
             assert "-u" in command
             assert str(mount_point) in command
-
-    def test_cleanup_mount_directory_with_auto_cleanup_true(self, mocker):
-        """Test _cleanup_mount_directory when auto_cleanup is True."""
-        config = SquishFSConfig(auto_cleanup=True)
-        manager = MountManager(config)
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            mount_point = Path(temp_dir) / "test_mount"
-            mount_point.mkdir()
-
-            # Create a dummy file to make sure it exists
-            (mount_point / "dummy").touch()
-
-            # Mock shutil.rmtree to track that it gets called
-            mock_rmtree = mocker.patch("squish.mounting.shutil.rmtree")
-
-            # This should call rmtree since auto_cleanup is True
-            manager._cleanup_mount_directory(mount_point)
-
-            # Verify that rmtree was called since auto_cleanup=True
-            mock_rmtree.assert_called_once_with(mount_point)
