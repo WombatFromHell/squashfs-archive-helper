@@ -1,50 +1,23 @@
 PY = python3
 SRC_DIR = src
 BUILD_DIR = dist
-ENTRY = entry:main
+ENTRY_MODULE = entry
+ENTRY_FUNC = main
 PKG = squish
-OUT = $(BUILD_DIR)/$(PKG).pyz
+ARTIFACT = $(PKG).pyz
+OUT = $(BUILD_DIR)/$(ARTIFACT)
+CHECKSUM = $(BUILD_DIR)/$(ARTIFACT).sha256sum
 
-build:
-	mkdir -p $(BUILD_DIR)
-	$(PY) -m zipapp $(SRC_DIR) -o $(OUT) -m $(ENTRY) -p "/usr/bin/env python3"
-	chmod +x $(OUT)
+# Fixed epoch for reproducible builds:
+# Default to Jan 1, 1980 00:00:00 UTC (315532800) if not set
+SOURCE_DATE_EPOCH ?= 315532800
+export SOURCE_DATE_EPOCH
 
-install: $(OUT)
-	REAL_HOME="$$(realpath "$$HOME")"; \
-	if [ -d "$$REAL_HOME/.local/bin/scripts/" ]; then \
-		INSTALL_DIR="$$REAL_HOME/.local/bin/scripts"; \
-	else \
-		mkdir -p "$$REAL_HOME/.local/bin"; \
-		INSTALL_DIR="$$REAL_HOME/.local/bin"; \
-	fi; \
-	cp $(OUT) "$$INSTALL_DIR/$(PKG).pyz"; \
-	chmod +x "$$INSTALL_DIR/$(PKG).pyz"; \
-	ln -sf "$$INSTALL_DIR/$(PKG).pyz" "$$REAL_HOME/.local/bin/$(PKG)"; \
-	echo "Installed to $$INSTALL_DIR/$(PKG).pyz"; \
-	mkdir -p "$$REAL_HOME/.local/share/kio/servicemenus/"; \
-	cp -f squashfs-actions.desktop "$$REAL_HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"; \
-	kbuildsycoca5 --noincremental; \
-	echo "Installed servicemenu to $$REAL_HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"
+# Extract version from pyproject.toml
+VERSION := $(shell grep '^version = ' pyproject.toml | cut -d'"' -f2)
 
-test:
-	uv run pytest -v --cov=src --cov-report=term-missing --cov-branch --tb=short
-
-lint:
-	ruff check ./src ./tests; \
-		pyright ./src ./tests
-
-prettier:
-	prettier --cache -c -w *.md
-
-format: prettier
-	ruff check --select I ./src ./tests --fix; \
-	ruff format ./src ./tests
-
-quality: lint format
-
-radon:
-	uv run radon cc ./src/$(PKG)/ -a
+# Human-readable timestamp for logging
+TIMESTAMP := $(shell date -d "@$(SOURCE_DATE_EPOCH)" -u +%Y-%m-%dT%H:%M:%SZ)
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +; \
@@ -52,10 +25,90 @@ clean:
 	$(BUILD_DIR) \
 	.pytest_cache \
 	.ruff_cache \
-	.coverage \
-	/tmp/tmp*.mounted
+	.direnv \
+	.coverage
+
+build: clean
+	@echo "Building $(ARTIFACT) (version $(VERSION))"
+	@echo "SOURCE_DATE_EPOCH: $(SOURCE_DATE_EPOCH) ($(TIMESTAMP))"
+	mkdir -p $(BUILD_DIR)
+
+	# Create staging directory for deterministic build
+	# Copy contents of src/ directly into staging (not src/ itself)
+	rm -rf $(BUILD_DIR)/staging
+	mkdir -p $(BUILD_DIR)/staging
+	cp -r $(SRC_DIR)/* $(BUILD_DIR)/staging/
+
+	# Create __main__.py for bundle entry point (overwrite if exists)
+	echo "from entry import main; main()" > $(BUILD_DIR)/staging/__main__.py
+
+	# Inject version by replacing placeholder in version.py
+	# Use word boundary to avoid replacing in the comparison check
+	sed -i 's/__version__ = "__BUILD_VERSION__"/__version__ = "$(VERSION)"/' $(BUILD_DIR)/staging/squish/version.py
+
+	# Normalize timestamps on ALL files in staging directory
+	# This is crucial for bitwise determinism
+	find $(BUILD_DIR)/staging -exec touch -d "@$(SOURCE_DATE_EPOCH)" {} \;
+
+	# Create the zip archive deterministically
+	# -X: strip extra file attributes
+	# -q: quiet mode
+	# Using 'find | LC_ALL=C sort' ensures consistent file ordering across systems
+	cd $(BUILD_DIR)/staging && \
+		find . -type f | LC_ALL=C sort | \
+		zip -X -q -@ ../archive.zip
+
+	# Prepend shebang to create executable pyz
+	echo '#!/usr/bin/env python3' > $(OUT)
+	cat $(BUILD_DIR)/archive.zip >> $(OUT)
+	chmod +x $(OUT)
+
+	# Generate SHA256 checksum file for verification (basename only for portability)
+	cd $(BUILD_DIR) && sha256sum $(ARTIFACT) > $(ARTIFACT).sha256sum
+
+	# Cleanup staging and intermediate files
+	rm -rf $(BUILD_DIR)/staging $(BUILD_DIR)/archive.zip
+
+	@echo "Built: $(OUT)"
+	@echo "SHA256: $$(cat $(OUT).sha256sum | cut -d' ' -f1)"
+
+install: $(OUT)
+	@cd $(BUILD_DIR) && sha256sum -c $(ARTIFACT).sha256sum
+	@if [ -d "$$HOME/.local/bin/scripts/" ]; then \
+		INSTALL_DIR="$$HOME/.local/bin/scripts"; \
+	else \
+		mkdir -p "$$HOME/.local/bin"; \
+		INSTALL_DIR="$$HOME/.local/bin"; \
+	fi; \
+	cp -f $(OUT) $(OUT).sha256sum "$$INSTALL_DIR/"; \
+	chmod +x "$$INSTALL_DIR/$(ARTIFACT)"; \
+	ln -sf "$$INSTALL_DIR/$(ARTIFACT)" "$$HOME/.local/bin/$(PKG)"; \
+	echo "Installed to $$INSTALL_DIR/$(ARTIFACT)"; \
+	mkdir -p "$$HOME/.local/share/kio/servicemenus/"; \
+	cp -f squashfs-actions.desktop "$$HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"; \
+	kbuildsycoca5 --noincremental; \
+	echo "Installed servicemenu to $$HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"
+
+test:
+	uv run pytest --tb=short --cov=src --cov-report=term-missing --cov-branch
+
+lint:
+	uv run ty check ./src ./tests; \
+		uv run ruff check ./src ./tests --fix
+
+prettier:
+	uv run prettier -c -w *.md
+
+format: prettier
+	uv run ruff check --select I ./src ./tests --fix; \
+	uv run ruff format ./src ./tests
+
+radon:
+	uv run radon cc ./src/$(PKG)/ -a
+
+quality: lint format
 
 all: clean build install
 
-.PHONY: all clean install build test prettier quality lint format radon
-.SILENT: all clean install build test prettier quality lint format radon
+.PHONY: build install test lint prettier format radon quality clean all
+.SILENT: build install test lint prettier format radon quality clean all

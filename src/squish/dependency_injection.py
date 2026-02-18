@@ -499,10 +499,10 @@ class TestDIContainer(DIContainer):
             Configured test manager instance
         """
         # This will be implemented to return a properly configured test manager
-        from .core import SquashFSManager  # type: ignore
+        from .core import SquashFSManager
 
         if config is None:
-            from .config import SquishFSConfig  # type: ignore
+            from .config import SquishFSConfig
 
             config = SquishFSConfig()
         return SquashFSManager(config)

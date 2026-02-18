@@ -617,7 +617,7 @@ class TestMountingCoverageGaps:
                     # Return False to allow mounting to proceed
                     return False
 
-                manager.tracker.is_mounted = mock_is_mounted
+                manager.tracker.is_mounted = mock_is_mounted  # type: ignore[assignment]
 
                 # Track if mount was recorded
                 mount_recorded = []
@@ -625,7 +625,7 @@ class TestMountingCoverageGaps:
                 def mock_record_mount(file_path, mount_point):
                     mount_recorded.append((file_path, mount_point))
 
-                manager.tracker.record_mount = mock_record_mount
+                manager.tracker.record_mount = mock_record_mount  # type: ignore[assignment]
 
                 # This should create the directory and mount
                 manager.mount(file_path, str(mount_point))
@@ -637,8 +637,8 @@ class TestMountingCoverageGaps:
                 assert len(mount_recorded) == 1
 
                 # Restore original methods
-                manager.tracker.is_mounted = original_is_mounted
-                manager.tracker.record_mount = original_record_mount
+                manager.tracker.is_mounted = original_is_mounted  # type: ignore[assignment]
+                manager.tracker.record_mount = original_record_mount  # type: ignore[assignment]
 
     def test_determine_mount_point_with_custom_mount_point(self, mocker, caplog):
         """Test _determine_mount_point when a custom mount point is provided."""

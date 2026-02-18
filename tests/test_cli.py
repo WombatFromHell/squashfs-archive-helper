@@ -1082,11 +1082,11 @@ class TestCLICoverageGaps:
         original_squashfs_manager = squish.cli.SquashFSManager
         original_validate_file = squish.cli.validate_file_exists
 
-        squish.cli.parse_args = mock_parse_args
-        squish.cli.get_logger_from_args = mock_get_logger
-        squish.cli.get_config_from_args = mock_get_config
-        squish.cli.SquashFSManager = mock_squashfs_manager
-        squish.cli.validate_file_exists = mock_validate_file
+        squish.cli.parse_args = mock_parse_args  # type: ignore[assignment]
+        squish.cli.get_logger_from_args = mock_get_logger  # type: ignore[assignment]
+        squish.cli.get_config_from_args = mock_get_config  # type: ignore[assignment]
+        squish.cli.SquashFSManager = mock_squashfs_manager  # type: ignore[assignment]
+        squish.cli.validate_file_exists = mock_validate_file  # type: ignore[assignment]
 
         try:
             with pytest.raises(SystemExit) as exc_info:
@@ -1154,11 +1154,11 @@ class TestCLICoverageGaps:
         original_squashfs_manager = squish.cli.SquashFSManager
         original_validate_file = squish.cli.validate_file_exists
 
-        squish.cli.parse_args = mock_parse_args
-        squish.cli.get_logger_from_args = mock_get_logger
-        squish.cli.get_config_from_args = mock_get_config
-        squish.cli.SquashFSManager = mock_squashfs_manager
-        squish.cli.validate_file_exists = mock_validate_file
+        squish.cli.parse_args = mock_parse_args  # type: ignore[assignment]
+        squish.cli.get_logger_from_args = mock_get_logger  # type: ignore[assignment]
+        squish.cli.get_config_from_args = mock_get_config  # type: ignore[assignment]
+        squish.cli.SquashFSManager = mock_squashfs_manager  # type: ignore[assignment]
+        squish.cli.validate_file_exists = mock_validate_file  # type: ignore[assignment]
         mocker.patch("sys.exit", side_effect=mock_exit)
 
         try:
@@ -1235,11 +1235,11 @@ class TestCLICoverageGaps:
         original_squashfs_manager = squish.cli.SquashFSManager
         original_validate_file = squish.cli.validate_file_exists
 
-        squish.cli.parse_args = mock_parse_args
-        squish.cli.get_logger_from_args = mock_get_logger
-        squish.cli.get_config_from_args = mock_get_config
-        squish.cli.SquashFSManager = mock_squashfs_manager
-        squish.cli.validate_file_exists = mock_validate_file
+        squish.cli.parse_args = mock_parse_args  # type: ignore[assignment]
+        squish.cli.get_logger_from_args = mock_get_logger  # type: ignore[assignment]
+        squish.cli.get_config_from_args = mock_get_config  # type: ignore[assignment]
+        squish.cli.SquashFSManager = mock_squashfs_manager  # type: ignore[assignment]
+        squish.cli.validate_file_exists = mock_validate_file  # type: ignore[assignment]
 
         try:
             with pytest.raises(SystemExit) as exc_info:
@@ -1307,11 +1307,11 @@ class TestCLICoverageGaps:
         original_squashfs_manager = squish.cli.SquashFSManager
         original_validate_file = squish.cli.validate_file_exists
 
-        squish.cli.parse_args = mock_parse_args
-        squish.cli.get_logger_from_args = mock_get_logger
-        squish.cli.get_config_from_args = mock_get_config
-        squish.cli.SquashFSManager = mock_squashfs_manager
-        squish.cli.validate_file_exists = mock_validate_file
+        squish.cli.parse_args = mock_parse_args  # type: ignore[assignment]
+        squish.cli.get_logger_from_args = mock_get_logger  # type: ignore[assignment]
+        squish.cli.get_config_from_args = mock_get_config  # type: ignore[assignment]
+        squish.cli.SquashFSManager = mock_squashfs_manager  # type: ignore[assignment]
+        squish.cli.validate_file_exists = mock_validate_file  # type: ignore[assignment]
         mocker.patch("sys.exit", side_effect=mock_exit)
 
         try:

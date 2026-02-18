@@ -55,7 +55,7 @@ from typing import Any, Dict, Optional
 try:
     import toml
 except ImportError:
-    toml = None
+    toml = None  # type: ignore[assignment]
 
 
 @dataclass(frozen=True)
@@ -224,7 +224,7 @@ def get_merged_config(cli_args: Optional[Dict[str, Any]] = None) -> SquishFSConf
         SquishFSConfig object with merged configuration
     """
     # 1. Start with defaults
-    config_dict = {
+    config_dict: Dict[str, Any] = {
         "mount_base": "mounts",
         "temp_dir": "/tmp",
         "auto_cleanup": True,
@@ -253,4 +253,18 @@ def get_merged_config(cli_args: Optional[Dict[str, Any]] = None) -> SquishFSConf
                 config_dict[key] = value
 
     # 5. Create and return SquishFSConfig
-    return SquishFSConfig(**config_dict)
+    processors_value = config_dict.get("processors")
+    exclude_value = config_dict.get("exclude")
+    xattr_mode_value = config_dict.get("xattr_mode")
+
+    return SquishFSConfig(
+        mount_base=str(config_dict.get("mount_base", "mounts")),
+        temp_dir=str(config_dict.get("temp_dir", "/tmp")),
+        auto_cleanup=bool(config_dict.get("auto_cleanup", True)),
+        verbose=bool(config_dict.get("verbose", False)),
+        compression=str(config_dict.get("compression", "zstd")),
+        block_size=str(config_dict.get("block_size", "1M")),
+        processors=int(processors_value) if processors_value is not None else None,
+        xattr_mode=str(xattr_mode_value) if xattr_mode_value is not None else None,
+        exclude=list(exclude_value) if exclude_value is not None else None,
+    )

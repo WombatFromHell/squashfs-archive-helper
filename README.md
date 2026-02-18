@@ -55,7 +55,7 @@ make all
 This will:
 
 1. Clean previous builds
-2. Create a zipapp bundle in `dist/squish.pyz`
+2. Create a Python bundle in `dist/squish.pyz`
 3. Install to `~/.local/bin/squish`
 4. Set up KIO servicemenu integration (Linux)
 

@@ -1,21 +1,89 @@
-# AGENTS.md - Tool Usage Guide for Agentic Tools
+# AGENTS.md - Agentic Coding Environment
 
-## Development Environment Tools
+## Project Overview
 
-### Testing Tools
+**squish** - SquashFS archive management tool with CLI for mount, build, extract, and checksum operations.
 
-- `make test` - Full test suite with coverage reporting
+## Quick Reference
 
-### Code Quality Tools
+| Task         | Command                              |
+| ------------ | ------------------------------------ |
+| Build bundle | `make build`                         |
+| Test         | `make test`                          |
+| Quality      | `make quality`                       |
+| All          | `make all` (clean + build + install) |
+| Dependencies | `uv add <pkg>` / `uv remove <pkg>`   |
 
-- `make quality` - Code linting/formatting checks
-- `make radon` - Code complexity analysis
+## Environment
 
-## Agent Workflow
+- **Python**: 3.13+ (see `.python-version`)
+- **Package Manager**: `uv`
+- **Virtual Env**: Auto-created via `uv sync`
+- **Build Output**: `dist/squish.pyz` (Python bundle)
+- **Install Target**: `~/.local/bin/squish`
 
-1. **Testing**: Use `uv run pytest -xvs` for test execution
-2. **Coverage Analysis**: Use `uv run pytest --cov=src/squish --cov-report=term-missing --cov-branch` to check code coverage (as configured in pyproject.toml)
-3. **Quality Checks**: Run `make quality` before commits to validate code with linting/formatting
-4. **Complexity Analysis**: Use `make radon` for refactoring code complexity validation
-5. Building and Deployment: Use `make all` to clean, build, and install locally to `~/.local/bin/mount-squashfs`
-6. **Dependency Management**: Use `uv` for package operations
+## Code Quality
+
+```bash
+make quality  # lint + format
+make radon    # complexity analysis
+```
+
+## Testing
+
+```bash
+# Full suite with coverage
+make test
+
+# Direct pytest with verbose output
+uv run pytest -xvs
+
+# Coverage report
+uv run pytest --cov=src/squish --cov-report=term-missing --cov-branch
+```
+
+## Test Markers
+
+- `@pytest.mark.slow` - Slow tests
+- `@pytest.mark.integration` - Integration tests
+- `@pytest.mark.unit` - Unit tests
+- `@pytest.mark.requires_sudo` - Needs sudo
+- `@pytest.mark.requires_zenity` - Needs Zenity GUI
+
+## Project Structure
+
+```
+src/
+  ├── entry.py          # Bundle entry point
+  └── squish/           # Main package
+      ├── cli.py        # CLI interface
+      ├── build.py      # SquashFS build logic
+      ├── mounting.py   # Mount/unmount operations
+      ├── extract.py    # Extract operations
+      ├── checksum.py   # Checksum generation/verification
+      └── ...
+tests/                  # Test suite
+dist/                   # Build artifacts (.pyz, .sha256sum)
+```
+
+## External Dependencies
+
+Required system tools (checked at runtime):
+
+- `mksquashfs` / `unsquashfs` - Archive creation/extraction
+- `squashfuse` / `fusermount` - Mount operations
+- `sha256sum` - Checksum operations
+- `zenity` - GUI progress (optional, falls back to console)
+
+## Reproducible Builds
+
+Bundles are deterministic via `SOURCE_DATE_EPOCH` (default: 315532800).
+See [REPRODUCIBLE_BUILDS.md](REPRODUCIBLE_BUILDS.md) for details.
+
+## Installation
+
+`make install` installs to:
+
+- `~/.local/bin/squish` (symlink to bundle)
+- `~/.local/bin/scripts/squish.pyz` (bundle)
+- `~/.local/share/kio/servicemenus/squashfs-actions.desktop` (KDE menu)

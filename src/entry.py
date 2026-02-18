@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Entry point for the mount-squashfs zipapp bundle.
+Entry point for the squish bundle.
 
-This module serves as the main entry point when the application is bundled
-using zipapp. It imports and runs the main functionality from the refactored
-mount-squashfs package.
+This module serves as the main entry point when the application is bundled.
+It imports and runs the CLI from the squish package.
 """
 
 import os
@@ -18,18 +17,18 @@ def main():
     """
     Main entry point for the bundled application.
 
-    This function will be called when the zipapp bundle is executed.
-    It imports and runs the main CLI from the refactored mount_squashfs package.
+    This function will be called when the bundle is executed.
+    It imports and runs the main CLI from the squish package.
     """
     try:
-        # Import the CLI from our refactored package
+        # Import the CLI from our package
         from squish.cli import main as cli_main
 
         # Run the CLI
         return cli_main()
 
     except ImportError as e:
-        print(f"Error: Could not import mount_squashfs package: {e}")
+        print(f"Error: Could not import squish package: {e}")
         print(
             "This might indicate a problem with the package structure or installation."
         )

@@ -1,8 +1,7 @@
 # Mount SquashFS package
 # This will be the main package for the mount-squashfs functionality
 
-__version__ = "0.1.0"
-
+# Import version module first
 # Import key components for easy access
 from .command_executor import (
     CommandExecutor,
@@ -86,8 +85,11 @@ from .tool_adapters import (
     ZenityAdapter,
 )
 from .tracking import MountTracker
+from .version import __version__, get_version
 
 __all__ = [
+    "__version__",
+    "get_version",
     "SquishFSConfig",
     "get_default_config",
     "SquashFSManager",

@@ -21,6 +21,7 @@ from .errors import (
     XattrError,
 )
 from .logging import get_logger
+from .version import get_version
 
 
 class CommandNotFound(Exception):
@@ -42,7 +43,8 @@ ALL_COMMANDS = ["mount", "unmount", "check", "build", "extract", "ls"]
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments with subcommands."""
     parser = argparse.ArgumentParser(
-        description="SquashFS archive management tool - mount, unmount, build, and list SquashFS archives",
+        prog="squish.pyz",
+        description=f"SquashFS archive management tool {get_version()} - mount, unmount, build, and list SquashFS archives",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Unique prefix matching is supported for all commands.
@@ -53,6 +55,11 @@ Ambiguous abbreviations will result in an error with suggestions.""".strip(),
     # Add global verbose flag
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose output"
+    )
+
+    # Add version flag
+    parser.add_argument(
+        "-V", "--version", action="version", version=f"%(prog)s {get_version()}"
     )
 
     # Create subparsers for different commands

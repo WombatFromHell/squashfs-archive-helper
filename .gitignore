@@ -1,6 +1,8 @@
 .venv
 .ruff_cache
 .pytest_cache
+.direnv
 __pycache__
 dist
+
 .coverage

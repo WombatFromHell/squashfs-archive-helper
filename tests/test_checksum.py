@@ -590,11 +590,11 @@ class TestChecksumFileValidationEdgeCases:
 
                         return file_path_obj, checksum_file_obj
 
-                    manager._validate_checksum_files = mock_method
+                    manager._validate_checksum_files = mock_method  # type: ignore[assignment]
                     try:
                         manager._validate_checksum_files(str(test_file))
                     finally:
-                        manager._validate_checksum_files = original_method
+                        manager._validate_checksum_files = original_method  # type: ignore[assignment]
 
 
 class TestChecksumExceptionCoverage:

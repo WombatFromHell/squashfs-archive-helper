@@ -100,8 +100,8 @@ class MockFactory:
         mock = self.create_mock(IProgressObserver, **kwargs)
 
         if progress_values is not None:
-            mock.on_progress_update.side_effect = (
-                lambda progress: progress_values.append(progress.percentage)
+            mock.on_progress_update.side_effect = lambda progress: (
+                progress_values.append(progress.percentage)
             )
 
         return mock
@@ -259,8 +259,8 @@ class MockFactory:
         mock = self.create_mock(IZenityAdapter, **kwargs)
 
         if progress_values is not None:
-            mock.update_progress.side_effect = (
-                lambda percentage, status: progress_values.append(percentage)
+            mock.update_progress.side_effect = lambda percentage, status: (
+                progress_values.append(percentage)
             )
 
         mock.check_cancelled.return_value = cancelled

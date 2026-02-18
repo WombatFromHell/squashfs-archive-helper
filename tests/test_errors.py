@@ -176,7 +176,7 @@ class TestResultClass:
 
     def test_result_unwrap_none_error_error(self):
         """Test unwrap with None error raises ValueError."""
-        result = Result.err(None)  # type: ignore
+        result = Result.err(None)
         try:
             result.unwrap()
             assert False, "Should have raised ValueError"
@@ -185,7 +185,7 @@ class TestResultClass:
 
     def test_result_with_none_error(self):
         """Test result with None error."""
-        result = Result.err(None)  # type: ignore
+        result = Result.err(None)
         assert result.is_err()
 
     def test_safe_operation_success(self):

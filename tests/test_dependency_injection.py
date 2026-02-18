@@ -680,7 +680,7 @@ class TestDIContainerCoverageGaps:
 
         # This should handle None gracefully
         try:
-            container.register_mock(TestService, None)  # type: ignore
+            container.register_mock(TestService, None)
             # If no exception, that's fine for this test
         except Exception:
             # If exception is raised, that's also acceptable
