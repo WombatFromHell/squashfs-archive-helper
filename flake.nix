@@ -33,6 +33,8 @@
             pkgs.gnused
             pkgs.gnugrep
             pkgs.coreutils
+            pkgs.squashfuse
+            pkgs.prettier
             pkgs.gnutar
             pkgs.which
             pkgs.gawk
