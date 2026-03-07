@@ -4,5 +4,6 @@
 .direnv
 __pycache__
 dist
+artifact
 
 .coverage

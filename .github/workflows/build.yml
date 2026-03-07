@@ -26,9 +26,9 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Build Release Artifact
+      - name: Package Release Artifacts
         run: |
-          nix develop -c make ci
+          nix develop -c make package
 
       # only expose CI artifacts on workflow_dispatch
       - name: Upload Workflow Artifact
@@ -36,7 +36,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: build-artifacts
-          path: dist/**/*
+          path: |
+            artifact/*
           retention-days: 30
           if-no-files-found: error
 
@@ -44,9 +45,9 @@ jobs:
         if: github.event_name != 'workflow_dispatch'
         uses: softprops/action-gh-release@v1
         with:
-          # Uploads all files found in the dist/ directory
+          # Upload all packaged artifacts from artifact/ directory
           files: |
-            dist/**/*
+            artifact/*
           draft: false
           prerelease: false
           # Optional: Generate release notes from git tags

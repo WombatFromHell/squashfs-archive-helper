@@ -81,8 +81,8 @@ install: $(OUT)
 	@if [ -d "$$HOME/.local/bin/scripts/" ]; then \
 		INSTALL_DIR="$$HOME/.local/bin/scripts"; \
 	else \
-		mkdir -p "$$HOME/.local/bin"; \
 		INSTALL_DIR="$$HOME/.local/bin"; \
+		mkdir -p "$$INSTALL_DIR"; \
 	fi; \
 	cp -f $(OUT) $(OUT).sha256sum "$$INSTALL_DIR/"; \
 	chmod +x "$$INSTALL_DIR/$(ARTIFACT)"; \
@@ -90,8 +90,12 @@ install: $(OUT)
 	echo "Installed to $$INSTALL_DIR/$(ARTIFACT)"; \
 	mkdir -p "$$HOME/.local/share/kio/servicemenus/"; \
 	cp -f squashfs-actions.desktop "$$HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"; \
-	kbuildsycoca5 --noincremental; \
-	echo "Installed servicemenu to $$HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"
+	if command -v kbuildsycoca5 >/dev/null 2>&1; then \
+		kbuildsycoca5 --noincremental; \
+		echo "Installed servicemenu to $$HOME/.local/share/kio/servicemenus/squashfs-actions.desktop"; \
+	else \
+		echo "kbuildsycoca5 not found, skipping menu cache refresh"; \
+	fi
 
 test:
 	uv run pytest --tb=short --cov=src --cov-report=term-missing --cov-branch
@@ -112,9 +116,23 @@ radon:
 
 quality: lint format
 
+package: ci
+	rm -rf ./artifact && mkdir -p ./artifact
+	tar -czf ./artifact/$(PKG)-$(VERSION).tar.gz -C ./dist .
+	cd ./artifact && \
+		sha256sum $(PKG)-$(VERSION).tar.gz > $(PKG)-$(VERSION).tar.gz.sha256sum && \
+		sha256sum -c $(PKG)-$(VERSION).tar.gz.sha256sum
+
 ci: configure test quality build
+	cp -f \
+		squashfs-actions.desktop \
+		install.sh \
+		LICENSE \
+		README.md \
+		dist/
+	chmod +x dist/install.sh
 
 all: clean build install
 
-.PHONY: build install test lint prettier format radon quality clean all configure ci
-.SILENT: build install test lint prettier format radon quality clean all configure ci
+.PHONY: build install test lint prettier format radon quality clean all configure ci package
+.SILENT: build install test lint prettier format radon quality clean all configure ci package
