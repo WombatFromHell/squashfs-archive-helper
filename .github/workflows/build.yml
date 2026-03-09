@@ -1,0 +1,27 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - "v*" # Push events that match v*, i.e. v1.0
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Build and Package
+        run: make package
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifact/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
