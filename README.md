@@ -1,6 +1,6 @@
 # SquashFS Archive Helper
 
-A bash wrapper with KDE service-menu integration for managing SquashFS archives with built-in integrity verification and GUI progress feedback.
+A set of bash wrappers with KDE service-menu integration for managing SquashFS archives with built-in integrity verification and GUI progress feedback.
 
 ## Features
 
@@ -25,10 +25,10 @@ A bash wrapper with KDE service-menu integration for managing SquashFS archives 
 # Create an archive from one or more directories
 squish /path/to/data -o backup.sqsh
 
-# Mount an archive to a managed mountpoint
+# Mount an archive to a managed mountpoint (auto-verifies checksum)
 squish -m backup.sqsh
 
-# Unmount an archive
+# Unmount an archive and cleanup mountpoints
 squish -u backup.sqsh
 ```
 
@@ -44,5 +44,36 @@ unsquish --list backup.sqsh
 
 ## Installation
 
-1. Install `src/squish.sh` and `src/unsquish.sh` to your `PATH` (e.g., `~/.local/bin/`) and link them as `squish` and `unsquish`.
-2. (KDE Users) Copy `assets/squashfs-actions.desktop` to `~/.local/share/kio/servicemenus/`.
+### Using Release Archive
+
+1. Download and extract the latest release.
+2. Run the included installation script:
+
+   ```bash
+   ./install.sh
+   ```
+
+   _This installs binaries to `~/.local/bin` and the KDE service menu to the appropriate local path._
+
+### From Source
+
+1. Clone the repository.
+2. Build and install using the Makefile:
+
+   ```bash
+   make build
+   make install
+   ```
+
+### Uninstallation
+
+To remove all installed files, run:
+
+```bash
+./install.sh --uninstall
+```
+
+## Development
+
+- `make package`: Creates a reproducible, versioned tarball in the `artifact/` directory.
+- `make format`: Formats all shell scripts and markdown files.
