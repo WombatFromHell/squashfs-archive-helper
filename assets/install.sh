@@ -71,10 +71,10 @@ do_uninstall() {
 }
 
 case "${1:-}" in
-  -u | --uninstall) do_uninstall ;;
-  -h | --help)
-    echo "Usage: $0 [-u|--uninstall]"
-    exit 0
-    ;;
-  *) do_install ;;
+-u | --uninstall) do_uninstall ;;
+-h | --help)
+  echo "Usage: $0 [-u|--uninstall]"
+  exit 0
+  ;;
+*) do_install ;;
 esac
