@@ -1,5 +1,5 @@
 PROJECT = squashfs-archive-helper
-VERSION = 1.4.0
+VERSION = 1.4.1
 #
 SRC_DIR = src
 ASSET_DIR = assets
