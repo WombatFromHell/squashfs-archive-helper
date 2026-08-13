@@ -6,6 +6,7 @@ PRIO_BIN_DIR="$HOME/.local/bin/scripts"
 BIN_DIR="$HOME/.local/bin"
 KDE_DIR="$HOME/.local/share/kio/servicemenus"
 BINS=("squish.sh" "unsquish.sh")
+COMMON="squish-common.sh"
 DESKTOP="squashfs-actions.desktop"
 
 do_install() {
@@ -32,6 +33,12 @@ do_install() {
       ln -sf "$bin_dest" "$link_dest"
     fi
   done
+
+  # Install shared library alongside the binaries (no link; it is sourced)
+  if [[ -f $COMMON ]]; then
+    echo "  -> $target_dir/$COMMON"
+    install -m 644 "$COMMON" "$target_dir/$COMMON"
+  fi
 
   # Install KDE service menu
   if [[ -f $DESKTOP ]]; then
@@ -66,6 +73,8 @@ do_uninstall() {
     rm -f "$BIN_DIR/$bin"
     rm -f "$PRIO_BIN_DIR/$bin"
   done
+  rm -f "$BIN_DIR/$COMMON"
+  rm -f "$PRIO_BIN_DIR/$COMMON"
   rm -f "$KDE_DIR/$DESKTOP"
   echo "Uninstalled successfully."
 }
