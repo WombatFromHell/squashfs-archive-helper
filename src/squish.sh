@@ -405,7 +405,15 @@ run_progress_pipeline() {
   (
     "${cmd[@]}" "$target" "${BASE_MKSQUASHFS_ARGS[@]}" -info -percentage 2>&1
     echo "$?" >"$status_file"
-  ) | tee >(grep -v -E '^[0-9]+$' >/dev/tty) | grep --line-buffered -E '^[0-9]+$' >"$fifo" &
+  ) | tee >(grep -v -E '^[0-9]+$' >/dev/tty) | grep --line-buffered -E '^[0-9]+$' |
+    {
+      # ponytail: keep draining after the dialog closes at 100% so mksquashfs
+      # never sees a broken pipe mid-final-write; drop overruns after the reader
+      # (yad/zenity) is gone. Open the fifo once; per-line opens would block.
+      trap '' PIPE
+      exec 3>"$fifo"
+      while IFS= read -r p; do printf '%s\n' "$p" >&3 2>/dev/null ||:; done
+    } &
 
   _pipe_pid_ref=$!
 }
@@ -432,7 +440,7 @@ run_with_dialog() {
     return "$dialog_exit"
   fi
 
-  wait "$pipe_pid"
+  wait "$pipe_pid" || true
   local cmd_exit
   cmd_exit=$(cat "$status_file")
   rm -f "$status_file" "$fifo"
