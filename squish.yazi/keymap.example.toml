@@ -1,0 +1,34 @@
+[[mgr.prepend_keymap]]
+on = ["n", "b"]
+run = "plugin squish -- build"
+desc = "Squash Build"
+
+[[mgr.prepend_keymap]]
+on = ["n", "x"]
+run = "plugin squish -- extract"
+desc = "Squash Extract"
+
+[[mgr.prepend_keymap]]
+on = ["n", "X"]
+run = "plugin squish -- extract-pick"
+desc = "Squash Extract (pick path)"
+
+[[mgr.prepend_keymap]]
+on = ["n", "m"]
+run = "plugin squish -- mount"
+desc = "Squash Mount"
+
+[[mgr.prepend_keymap]]
+on = ["n", "u"]
+run = "plugin squish -- unmount"
+desc = "Squash Unmount"
+
+[[mgr.prepend_keymap]]
+on = ["n", "U"]
+run = "plugin squish -- unmount-tracked"
+desc = "Squash Unmount (select from tracked)"
+
+[[mgr.prepend_keymap]]
+on = ["n", "j"]
+run = "plugin squish -- jump"
+desc = "Squash Jump to mount"
