@@ -7,7 +7,7 @@ BIN_DIR="$HOME/.local/bin"
 KDE_DIR="$HOME/.local/share/kio/servicemenus"
 BINS=("squish.sh" "unsquish.sh")
 COMMON="squish-common.sh"
-DESKTOP="squashfs-actions.desktop"
+DESKTOPS=("squashfs-dir-actions.desktop" "squashfs-file-actions.desktop")
 
 do_install() {
   echo "Installing SquashFS Archive Helper..."
@@ -40,11 +40,14 @@ do_install() {
     install -m 644 "$COMMON" "$target_dir/$COMMON"
   fi
 
-  # Install KDE service menu
-  if [[ -f $DESKTOP ]]; then
-    echo "  -> $KDE_DIR/$DESKTOP"
-    install -m 755 "$DESKTOP" "$KDE_DIR/"
-  fi
+  # Install KDE service menus
+  local desktop
+  for desktop in "${DESKTOPS[@]}"; do
+    if [[ -f $desktop ]]; then
+      echo "  -> $KDE_DIR/$desktop"
+      install -m 755 "$desktop" "$KDE_DIR/"
+    fi
+  done
 
   # Refresh KDE cache if tools exist
   found_kde_tool=false
@@ -75,7 +78,9 @@ do_uninstall() {
   done
   rm -f "$BIN_DIR/$COMMON"
   rm -f "$PRIO_BIN_DIR/$COMMON"
-  rm -f "$KDE_DIR/$DESKTOP"
+  for desktop in "${DESKTOPS[@]}"; do
+    rm -f "$KDE_DIR/$desktop"
+  done
   echo "Uninstalled successfully."
 }
 

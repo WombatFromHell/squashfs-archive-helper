@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=application/x-squashfs;application/x-squashfs-image;application/vnd.squashfs;
+Actions=extract-squashfs;mount-squashfs;unmount-squashfs;
+Icon=utilities-file-archiver
+
+[Desktop Action extract-squashfs]
+Name=Extract
+Icon=utilities-file-archiver
+Exec=unsquish %f
+
+[Desktop Action mount-squashfs]
+Name=Mount
+Icon=media-optical-mount
+Exec=squish -m %f
+
+[Desktop Action unmount-squashfs]
+Name=Unmount
+Icon=tools-media-optical-erase
+Exec=squish -u %f

@@ -1,5 +1,5 @@
 PROJECT = squashfs-archive-helper
-VERSION = 1.5.0
+VERSION = 1.6.0
 #
 SRC_DIR = src
 ASSET_DIR = assets
@@ -20,18 +20,30 @@ build: clean
 	mkdir -p $(BUILD_DIR)
 	install -m 755 $(SRC_DIR)/*.sh $(BUILD_DIR)
 	install -m 755 $(ASSET_DIR)/install.sh $(BUILD_DIR)
-	install -m 755 $(ASSET_DIR)/squashfs-actions.desktop $(BUILD_DIR)
+	install -m 755 $(ASSET_DIR)/squashfs-dir-actions.desktop $(BUILD_DIR)
+	install -m 755 $(ASSET_DIR)/squashfs-file-actions.desktop $(BUILD_DIR)
 	install -m 644 LICENSE README.md $(BUILD_DIR)
+	install -d -m 755 $(BUILD_DIR)/squish.yazi
+	install -m 644 $(wildcard squish.yazi/*) $(BUILD_DIR)/squish.yazi
 	# Inject version into scripts
 	sed -i 's/^VERSION="dev"$$/VERSION="$(VERSION)"/' $(BUILD_DIR)/*.sh
 	@echo "Built $(PROJECT) @ $(VERSION) in $(BUILD_DIR)"
 
-install:
+install: build
 	cd $(BUILD_DIR) && ./install.sh
 
 format:
 	shfmt -i 2 -w $$(find $(SRC_DIR) $(ASSET_DIR) -type f -name "*.sh")
 	prettier -w ./*.md ./.github/workflows/*.yml
+
+test:
+	bash tests/test_uri_to_path.sh
+	bash tests/test_squish_unsquish.sh
+	@if command -v luajit >/dev/null 2>&1; then \
+		luajit tests/test_squish_yazi.lua; \
+	else \
+		echo "luajit not found; skipping squish.yazi tests"; \
+	fi
 
 package: build
 	rm -rf $(PKG_DIR) && mkdir -p $(PKG_DIR)
@@ -51,5 +63,5 @@ package: build
 
 all: clean build install
 
-.PHONY: clean build install format package all
-.SILENT: clean build install format package all
+.PHONY: clean build install format test package all
+.SILENT: clean build install format test package all

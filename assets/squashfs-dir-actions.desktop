@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=application/octet-stream;all/allfiles;inode/directory;
+Actions=build-squashfs;
+Icon=utilities-file-archiver
+
+[Desktop Action build-squashfs]
+Name=Build
+Icon=utilities-file-archiver
+Exec=squish --kio %U
