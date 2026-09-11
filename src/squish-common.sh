@@ -122,11 +122,14 @@ run_progress_pipeline() {
 # ponytail: pure bash percent-decode; paths cannot contain NUL so \x00 is a
 # non-issue. Non-file:// inputs pass through untouched.
 uri_to_path() {
-  [[ $1 == file://* ]] || { printf '%s' "$1"; return 0; }
+  [[ $1 == file://* ]] || {
+    printf '%s' "$1"
+    return 0
+  }
   local u="${1#file://}" out="" var
   while [[ $u =~ %([0-9A-Fa-f][0-9A-Fa-f]) ]]; do
     out+="${u%%"${BASH_REMATCH[0]}"*}"
-    printf -v var "\\x${BASH_REMATCH[1]}"
+    printf -v var "%b" "\\x${BASH_REMATCH[1]}"
     out+="$var"
     u="${u#*"${BASH_REMATCH[0]}"}"
   done
@@ -226,6 +229,9 @@ hash_with_progress() {
 # Shows a GUI confirmation of checksum health. No-op without yad.
 report_health_dialog() {
   local healthy="$1" file="$2" title="$3"
+  # ponytail: --pipe is the headless mode (it already suppresses the yad
+  # progress bar in hash_with_progress); no confirmation popup either.
+  [[ $PIPE_MODE -eq 1 ]] && return 0
   if ! command -v yad &>/dev/null; then
     return 0
   fi

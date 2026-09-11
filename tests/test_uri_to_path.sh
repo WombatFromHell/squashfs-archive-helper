@@ -2,7 +2,10 @@
 # Assert-based self-check for uri_to_path() in squish-common.sh.
 set -euo pipefail
 
+# shellcheck source=src/squish-common.sh
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../src" && pwd)/squish-common.sh"
+# Used by log() in the sourced file, which shellcheck can't see across files.
+# shellcheck disable=SC2034
 declare -i PIPE_MODE=0
 
 fail() {

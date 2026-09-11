@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$(realpath -- "${BASH_SOURCE[0]}")")" && pwd)"
-# shellcheck source=./squish-common.sh
+# shellcheck source=src/squish-common.sh
 source "${SCRIPT_DIR}/squish-common.sh"
 
 #######################################
@@ -11,7 +11,8 @@ source "${SCRIPT_DIR}/squish-common.sh"
 #######################################
 
 declare -r VERSION="dev"
-declare -r SCRIPT_NAME=$(basename "$0")
+SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_NAME
 
 declare -ra BASE_UNSQUASHFS_ARGS=(
   -no-xattrs

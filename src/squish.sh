@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$(realpath -- "${BASH_SOURCE[0]}")")" && pwd)"
-# shellcheck source=./squish-common.sh
+# shellcheck source=src/squish-common.sh
 source "${SCRIPT_DIR}/squish-common.sh"
 
 #######################################
@@ -11,7 +11,8 @@ source "${SCRIPT_DIR}/squish-common.sh"
 #######################################
 
 declare -r VERSION="dev"
-declare -r SCRIPT_NAME=$(basename "$0")
+SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_NAME
 
 declare -ra BASE_MKSQUASHFS_ARGS=(
   -comp zstd
@@ -436,9 +437,9 @@ determine_output_filename() {
     first_source_basename=$(basename "${SOURCES[0]}")
     OUTPUT_FILE="${first_source_basename}.sqsh"
 
-    # ponytail: KIO mode always uses the archive-* convention; a per-source
-    # default is meaningless when several sources are bundled into one archive
-    [[ $KIO_MODE -eq 1 ]] && OUTPUT_FILE=""
+    # ponytail: KIO mode uses the archive-* convention when several sources
+    # are bundled into one archive; a single source still infers <name>.sqsh
+    [[ $KIO_MODE -eq 1 && ${#SOURCES[@]} -gt 1 ]] && OUTPUT_FILE=""
 
     if [[ -n $OUTPUT_FILE && -e $OUTPUT_FILE ]]; then
       log info "Conflict detected: '$OUTPUT_FILE' already exists."
@@ -545,7 +546,7 @@ parse_arguments() {
       echo " -o, --output <file> Specify output filename (default: <first_source>.sqsh)"
       echo " -y, --skip-verify Skip SHA-256 verification before mounting"
       echo " -f, --force     Remove stale trackers / tolerate missing ones on mount & unmount"
-      echo " -k, --kio       KIO service-menu mode: args are file:// URIs, output uses 'archive-*' naming"
+      echo " -k, --kio       KIO service-menu mode: args are file:// URIs; multi-source output uses 'archive-*' naming"
       echo " --pipe Machine-readable mode: percentages to stdout, logs to stderr"
       echo " -h, --help Show this help message"
       exit 0

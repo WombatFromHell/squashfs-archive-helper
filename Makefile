@@ -1,5 +1,5 @@
 PROJECT = squashfs-archive-helper
-VERSION = 1.6.1
+VERSION = 1.6.2
 #
 SRC_DIR = src
 ASSET_DIR = assets
@@ -32,7 +32,10 @@ build: clean
 install: build
 	cd $(BUILD_DIR) && ./install.sh
 
-format:
+lint:
+	shellcheck ./src/*.sh ./tests/*.sh
+
+format: lint
 	shfmt -i 2 -w $$(find $(SRC_DIR) $(ASSET_DIR) -type f -name "*.sh")
 	prettier -w ./*.md ./.github/workflows/*.yml
 
