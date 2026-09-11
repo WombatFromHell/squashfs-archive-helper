@@ -26,6 +26,11 @@ ok "compress (path with space)"
 bash "$SRC/squish.sh" --pipe --check "$WORK/space.sqsh" 2>&1 | grep -q "VERIFIED" || fail "checksum verify failed"
 ok "checksum verify"
 
+# 2b. unsquish --check: explicit arg and positional fallback.
+bash "$SRC/unsquish.sh" --pipe --check "$WORK/space.sqsh" 2>&1 | grep -q "VERIFIED" || fail "unsquish --check failed"
+bash "$SRC/unsquish.sh" --pipe "$WORK/space.sqsh" --check 2>&1 | grep -q "VERIFIED" || fail "unsquish --check positional fallback failed"
+ok "unsquish --check"
+
 # 3. Extract and compare contents recursively.
 bash "$SRC/unsquish.sh" --pipe "$WORK/space.sqsh" -o "$WORK/out_space" || fail "unsquish extract failed"
 diff -r "$WORK/src with space" "$WORK/out_space/src with space" >/dev/null 2>&1 || fail "extracted contents differ"
