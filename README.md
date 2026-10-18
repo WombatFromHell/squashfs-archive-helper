@@ -30,6 +30,12 @@ squish -m backup.sqsh
 
 # Unmount an archive and cleanup mountpoints
 squish -u backup.sqsh
+
+# Mount and open the mounts folder in the desktop's own file manager
+squish -m --open backup.sqsh
+
+# Move into the mountpoint the command just created
+cd "$(squish -m --print-mountpoint backup.sqsh)"
 ```
 
 ### Extraction (`unsquish`)

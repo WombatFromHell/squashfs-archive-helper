@@ -33,17 +33,14 @@ install: build
 	cd $(BUILD_DIR) && ./install.sh
 
 lint:
-	shellcheck ./src/*.sh ./tests/*.sh
+	shellcheck ./src/*.sh ./tests/*.bash
 
 format: lint
 	shfmt -i 2 -w $$(find $(SRC_DIR) $(ASSET_DIR) -type f -name "*.sh")
 	prettier -w ./*.md ./.github/workflows/*.yml
 
 test:
-	@fails=0; for t in $(shell ls tests/test_*.sh | sort); do \
-		bash "$$t" || fails=$$((fails+1)); \
-	done; \
-	[ $$fails -eq 0 ]
+	bats -p tests/
 	@if command -v luajit >/dev/null 2>&1; then \
 		luajit tests/test_squish_yazi.lua; \
 	else \

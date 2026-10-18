@@ -13,7 +13,7 @@ Exec=unsquish %f
 [Desktop Action mount-squashfs]
 Name=Mount
 Icon=media-optical-mount
-Exec=squish -m %f
+Exec=squish -m --open %f
 
 [Desktop Action unmount-squashfs]
 Name=Unmount
