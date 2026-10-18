@@ -145,19 +145,29 @@ uri_to_path() {
 #######################################
 
 # Usage: verify_checksum_pair <archive_abs> <checksum_abs> <ui_title>
-# Returns 0/1 (never exits); shows the health dialog on failure.
+# Returns 0 verified, 1 mismatch or unreadable hash, 2 verification cancelled
+# by the user (a closed GUI dialog: not corruption, so no FAILED dialog).
 verify_checksum_pair() {
   local archive_abs="$1"
   local checksum_abs="$2"
   local ui_title="$3"
-  local target_basename checksum_file expected actual
+  local target_basename checksum_file expected actual hash_rc=0
   target_basename="$(basename "$archive_abs")"
   checksum_file="$(basename "$checksum_abs")"
 
   log info "Verifying '$target_basename' against '$checksum_file'..."
 
   expected="$(head -n1 "$checksum_abs" | awk '{print $1}')"
-  actual="$(hash_with_progress "$archive_abs" "$ui_title")" || return 1
+  actual="$(hash_with_progress "$archive_abs" "$ui_title")"
+  hash_rc=$?
+  if [[ $hash_rc -eq 2 ]]; then
+    log warn "Checksum verification cancelled for '$target_basename'"
+    return 2
+  elif [[ $hash_rc -ne 0 ]]; then
+    log error "Could not hash '$target_basename'"
+    report_health_dialog 0 "$target_basename" "$ui_title"
+    return 1
+  fi
 
   if [[ $expected != "$actual" ]]; then
     log error "Checksum verification FAILED for '$target_basename'"
@@ -169,14 +179,17 @@ verify_checksum_pair() {
 }
 
 # Usage: run_check <archive> <ui_title>
-# Verifies archive integrity and exits: health dialog + 0 on pass, 1 on fail.
+# Verifies archive integrity and exits: health dialog + 0 on pass, 1 on
+# mismatch, 2 when verification was cancelled by the user.
 run_check() {
-  local archive="$1" title="$2"
-  if check_archive "$archive" "$title"; then
+  local archive="$1" title="$2" rc=0
+  check_archive "$archive" "$title"
+  rc=$?
+  if [[ $rc -eq 0 ]]; then
     report_health_dialog 1 "$(basename "$archive")" "$title"
     exit 0
   fi
-  exit 1
+  exit $rc
 }
 
 # Usage: check_archive <input> <ui_title>
@@ -207,6 +220,8 @@ check_archive() {
 # Usage: hash_with_progress <file> <ui_title>
 # Streams a SHA-256 of <file>, showing a YAD progress bar when a GUI is
 # available (silent in --pipe mode). Prints the bare hash on stdout.
+# Returns 2 when the progress dialog was closed or cancelled, 1 when hashing
+# itself failed.
 hash_with_progress() {
   local file="$1" title="$2" tmp fifo
   tmp="$(mktemp)"
@@ -229,9 +244,12 @@ hash_with_progress() {
       kill "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
       rm -f "$fifo" "$tmp"
+      return 2
+    fi
+    if ! wait "$pid"; then
+      rm -f "$fifo" "$tmp"
       return 1
     fi
-    wait "$pid" || true
     rm -f "$fifo"
   else
     pv "$file" | sha256sum >"$tmp"

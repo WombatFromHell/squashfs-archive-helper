@@ -72,7 +72,7 @@ verify_archive_checksum() {
     exit 1
   fi
 
-  verify_checksum_pair "$archive_abs" "$checksum_abs" "SquashFS Archival" || exit 1
+  verify_checksum_pair "$archive_abs" "$checksum_abs" "SquashFS Archival" || exit $?
 }
 
 generate_checksum() {
@@ -131,14 +131,40 @@ remove_stale_trackers() {
   done
 }
 
-find_trackers_for_archive() {
-  local archive_abs="$1"
-  local tracker_dir candidate arc
+# Usage: all_trackers
+# Prints every tracker file in the tracker directory.
+all_trackers() {
+  local tracker_dir candidate
   tracker_dir="$(get_tracker_dir)"
   for candidate in "${tracker_dir}"/*.[0-9][0-9].mounted; do
-    [[ -f $candidate ]] || continue
-    arc="$(read_tracker_archive "$candidate")"
-    [[ $arc == "$archive_abs" ]] && echo "$candidate"
+    [[ -f $candidate ]] && echo "$candidate"
+  done
+}
+
+# Usage: tracker_matches <reader-fn> <value>
+# Prints tracker files whose recorded value, read with <reader-fn>
+# (read_tracker_archive or read_tracker_mountpoint), equals <value>.
+tracker_matches() {
+  local reader="$1" want="$2" candidate have
+  while IFS= read -r candidate; do
+    have="$("$reader" "$candidate")"
+    [[ $have == "$want" ]] && echo "$candidate"
+  done < <(all_trackers)
+}
+
+# Usage: live_trackers_for_archive <archive_abs>
+# Trackers for this archive; with --force, trackers whose mount died are
+# dropped first and the archive is rescanned.
+live_trackers_for_archive() {
+  local archive_abs="$1"
+  local candidates=() candidate
+  mapfile -t candidates < <(tracker_matches read_tracker_archive "$archive_abs")
+  if [[ ${#candidates[@]} -gt 0 && $FORCE -eq 1 ]]; then
+    remove_stale_trackers "${candidates[@]}"
+    mapfile -t candidates < <(tracker_matches read_tracker_archive "$archive_abs")
+  fi
+  for candidate in "${candidates[@]}"; do
+    echo "$candidate"
   done
 }
 
@@ -166,17 +192,14 @@ alloc_tracker_file() {
 }
 
 list_mounts() {
-  local tracker_dir candidate count=0
-  tracker_dir="$(get_tracker_dir)"
+  local candidate mountpoint archive_abs count=0
 
-  for candidate in "${tracker_dir}"/*.[0-9][0-9].mounted; do
-    [[ -f $candidate ]] || continue
-    local mountpoint archive_abs
+  while IFS= read -r candidate; do
     mountpoint="$(read_tracker_mountpoint "$candidate")"
     archive_abs="$(read_tracker_archive "$candidate")"
     echo "${archive_abs} -> ${mountpoint}"
     ((count++)) || true
-  done
+  done < <(all_trackers)
 
   if [[ $count -eq 0 ]]; then
     log info "No active mounts found."
@@ -185,61 +208,38 @@ list_mounts() {
 
 resolve_tracker_file() {
   local input_abs="$1"
-
+  local reader none_msg
   if [[ -f $input_abs && $input_abs == *.sqsh ]]; then
-    local matches=()
-    mapfile -t matches < <(find_trackers_for_archive "$input_abs")
-
-    case ${#matches[@]} in
-    0)
-      log error "No tracker file found for archive '$input_abs'. Is it currently mounted?"
-      return 1
-      ;;
-    1)
-      echo "${matches[0]}"
-      return 0
-      ;;
-    *)
-      log error "Unexpected: ${#matches[@]} tracker files all reference archive '$input_abs':"
-      local m
-      for m in "${matches[@]}"; do log error "  $m"; done
-      log error "Remove stale tracker files manually and retry."
-      return 1
-      ;;
-    esac
-
+    reader=read_tracker_archive
+    none_msg="No tracker file found for archive '$input_abs'. Is it currently mounted?"
   elif [[ -d $input_abs ]]; then
-    local tracker_dir candidate matches=()
-    tracker_dir="$(get_tracker_dir)"
-    for candidate in "${tracker_dir}"/*.[0-9][0-9].mounted; do
-      [[ -f $candidate ]] || continue
-      local mp
-      mp="$(read_tracker_mountpoint "$candidate")"
-      [[ $mp == "$input_abs" ]] && matches+=("$candidate")
-    done
-
-    case ${#matches[@]} in
-    0)
-      log error "No tracker file in '${tracker_dir}' found referencing mountpoint '$input_abs'."
-      return 1
-      ;;
-    1)
-      echo "${matches[0]}"
-      return 0
-      ;;
-    *)
-      log error "Corrupt tracker state: ${#matches[@]} tracker files all reference mountpoint '$input_abs':"
-      local m
-      for m in "${matches[@]}"; do log error "  $m"; done
-      log error "Remove stale tracker files manually and retry."
-      return 1
-      ;;
-    esac
-
+    reader=read_tracker_mountpoint
+    none_msg="No tracker file in '$(get_tracker_dir)' found referencing mountpoint '$input_abs'."
   else
     log error "Cannot resolve tracker: '$input_abs' is neither a .sqsh file nor a directory."
     return 1
   fi
+
+  local matches=()
+  mapfile -t matches < <(tracker_matches "$reader" "$input_abs")
+
+  case ${#matches[@]} in
+  0)
+    log error "$none_msg"
+    return 1
+    ;;
+  1)
+    echo "${matches[0]}"
+    return 0
+    ;;
+  *)
+    log error "Corrupt tracker state: ${#matches[@]} tracker files all reference '$input_abs':"
+    local m
+    for m in "${matches[@]}"; do log error "  $m"; done
+    log error "Remove stale tracker files manually and retry."
+    return 1
+    ;;
+  esac
 }
 
 #######################################
@@ -257,21 +257,14 @@ mount_archive() {
   fi
 
   local candidates=()
-  mapfile -t candidates < <(find_trackers_for_archive "$archive_abs")
+  mapfile -t candidates < <(live_trackers_for_archive "$archive_abs")
 
   if [[ ${#candidates[@]} -gt 0 ]]; then
-    if [[ $FORCE -eq 1 ]]; then
-      remove_stale_trackers "${candidates[@]}"
-      mapfile -t candidates < <(find_trackers_for_archive "$archive_abs")
-    fi
-
-    if [[ ${#candidates[@]} -gt 0 ]]; then
-      local existing_mount
-      existing_mount="$(read_tracker_mountpoint "${candidates[0]}")"
-      log error "Archive is already mounted at '$existing_mount' (tracker: '${candidates[0]}')."
-      log error "Unmount first with: $SCRIPT_NAME -u '$archive_abs'"
-      exit 1
-    fi
+    local existing_mount
+    existing_mount="$(read_tracker_mountpoint "${candidates[0]}")"
+    log error "Archive is already mounted at '$existing_mount' (tracker: '${candidates[0]}')."
+    log error "Unmount first with: $SCRIPT_NAME -u '$archive_abs'"
+    exit 1
   fi
 
   local stem tracker_file
@@ -351,10 +344,8 @@ unmount_archive() {
 
   if [[ $FORCE -eq 1 ]]; then
     if [[ -f $input_abs && $input_abs == *.sqsh ]]; then
-      local cands live=()
-      mapfile -t cands < <(find_trackers_for_archive "$input_abs")
-      remove_stale_trackers "${cands[@]}"
-      mapfile -t live < <(find_trackers_for_archive "$input_abs")
+      local live=()
+      mapfile -t live < <(live_trackers_for_archive "$input_abs")
 
       if [[ ${#live[@]} -eq 0 ]]; then
         log info "Archive '$input_abs' is not currently mounted."
@@ -390,30 +381,27 @@ unmount_archive() {
 # COMPRESSION OPERATIONS
 #######################################
 
-compress_with_yad() {
-  local target="$1"
+# Usage: compress_with_ui <yad|zenity> <target>
+# Compresses through run_with_dialog so mksquashfs percentage lines drive the
+# chosen GUI gauge. -info is not passed: it suppresses those lines.
+compress_with_ui() {
+  local ui="$1" target="$2"
+  local -a dialog
+  case "$ui" in
+  yad)
+    dialog=(yad --progress --title="SquashFS Archival" --text="Compressing to ${target}..." --percentage=0 --auto-close --center --width=450 --borders=15 --bar-style=normal)
+    ;;
+  zenity)
+    dialog=(zenity --progress --title="SquashFS Archival" --text="Compressing to ${target}..." --percentage=0 --auto-close)
+    ;;
+  *)
+    log error "No GUI dialog arguments for UI '$ui'."
+    return 1
+    ;;
+  esac
   run_with_dialog \
-    mksquashfs "${SOURCES[@]}" "$target" "${BASE_MKSQUASHFS_ARGS[@]}" -info -percentage -- \
-    yad --progress \
-    --title="SquashFS Archival" \
-    --text="Compressing to ${target}..." \
-    --percentage=0 \
-    --auto-close \
-    --center \
-    --width=450 \
-    --borders=15 \
-    --bar-style=normal
-}
-
-compress_with_zenity() {
-  local target="$1"
-  run_with_dialog \
-    mksquashfs "${SOURCES[@]}" "$target" "${BASE_MKSQUASHFS_ARGS[@]}" -info -percentage -- \
-    zenity --progress \
-    --title="SquashFS Archival" \
-    --text="Compressing to ${target}..." \
-    --percentage=0 \
-    --auto-close
+    mksquashfs "${SOURCES[@]}" "$target" "${BASE_MKSQUASHFS_ARGS[@]}" -progress -percentage -- \
+    "${dialog[@]}"
 }
 
 compress_cli() {
@@ -628,10 +616,10 @@ main() {
     compress_pipe "$OUTPUT_FILE" || exit_code=$?
   elif command -v yad &>/dev/null; then
     log info "Starting compression with YAD UI..."
-    compress_with_yad "$OUTPUT_FILE" || exit_code=$?
+    compress_with_ui yad "$OUTPUT_FILE" || exit_code=$?
   elif command -v zenity &>/dev/null; then
     log info "Starting compression with Zenity UI..."
-    compress_with_zenity "$OUTPUT_FILE" || exit_code=$?
+    compress_with_ui zenity "$OUTPUT_FILE" || exit_code=$?
   else
     log info "No GUI available. Falling back to CLI output..."
     compress_cli "$OUTPUT_FILE" || exit_code=$?

@@ -40,8 +40,10 @@ format: lint
 	prettier -w ./*.md ./.github/workflows/*.yml
 
 test:
-	bash tests/test_uri_to_path.sh
-	bash tests/test_squish_unsquish.sh
+	@fails=0; for t in $(shell ls tests/test_*.sh | sort); do \
+		bash "$$t" || fails=$$((fails+1)); \
+	done; \
+	[ $$fails -eq 0 ]
 	@if command -v luajit >/dev/null 2>&1; then \
 		luajit tests/test_squish_yazi.lua; \
 	else \
