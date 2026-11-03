@@ -3,6 +3,7 @@
 # the same way by every CLI that meets it. Pins the sentences the suites assert
 # on so a reword cannot silently fork a failure path.
 
+# shellcheck source=tests/helpers.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/helpers.bash"
 
 make_unclean_archive() { # an archive whose checksum half is missing

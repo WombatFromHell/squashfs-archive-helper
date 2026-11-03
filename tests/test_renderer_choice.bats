@@ -3,8 +3,12 @@
 # re-asks which GUI exists, so these assertions are the whole contract for
 # resolve_renderer and show_progress.
 
+# bats runs every test in its own subshell, so exporting a fixture variable is
+# local to that test on purpose — the stub tools read it from the environment.
+# shellcheck disable=SC2030,SC2031
+# shellcheck source=tests/helpers.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/helpers.bash"
-# shellcheck source=./stubs.bash
+# shellcheck source=tests/stubs.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/stubs.bash"
 # shellcheck source=src/squish-common.sh
 source "$SRC/squish-common.sh"
@@ -38,14 +42,14 @@ emitter_args() {
 @test "zenity is chosen when yad is absent" {
   PIPE_MODE=0
   stub_dialog_ready zenity
-  PATH="$WORK/stub"
+  export PATH="$WORK/stub" # narrowed to the stub dir so a real yad cannot answer
   resolve_renderer
   [[ $RENDERER == zenity ]]
 }
 
 @test "cli is chosen when neither GUI exists" {
   PIPE_MODE=0
-  PATH="$WORK/stub"
+  export PATH="$WORK/stub" # narrowed to the stub dir so neither GUI can answer
   resolve_renderer
   [[ $RENDERER == cli ]]
 }
@@ -71,7 +75,7 @@ emitter_args() {
   local out
   out="$(show_progress 'SquashFS Archival' 'Compressing...')"
   grep -q '^100$' <<<"$out"
-  ! grep -q 'Parallel model emitter' <<<"$out"
+  run ! grep -q 'Parallel model emitter' <<<"$out"
   [[ ! -s "$RECEIPT" ]]
 }
 
@@ -85,5 +89,5 @@ emitter_args() {
   emitter_args -progress -percentage
   show_progress "SquashFS Archival" "Compressing to m.sqsh..."
   grep -q '^100$' "$RECEIPT"
-  ! grep -q 'Parallel model emitter' "$RECEIPT"
+  run ! grep -q 'Parallel model emitter' "$RECEIPT"
 }

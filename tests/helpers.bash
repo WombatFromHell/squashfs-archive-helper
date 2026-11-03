@@ -1,10 +1,14 @@
 # shellcheck shell=bash
+# SRC, WORK, OUT and RC are read by the sourcing .bats files, which shellcheck
+# cannot see from here.
+# shellcheck disable=SC2034
 # Sourced by every tests/*.bats file. bats gives errexit per test, but no
 # scratch area: this resolves ../src from the test file and hands out a temp
 # directory that bats removes when the run finishes (BATS_RUN_TMPDIR). bats
 # runs the file's top level once per test, so every test gets its own WORK.
 # The suites that drive squish.sh share this layout and the squish runner.
-# shellcheck disable=SC2034
+# Suites assert on failures with `run !`, which needs Bats >= 1.5.0.
+bats_require_minimum_version 1.5.0
 SRC="$(cd -- "$(dirname -- "${BATS_TEST_FILENAME:?set}")/../src" && pwd)"
 WORK="$(mktemp -d "${BATS_RUN_TMPDIR:?set}/XXXXXX")"
 mkdir -p "$WORK/stub" "$WORK/data" "$WORK/run"

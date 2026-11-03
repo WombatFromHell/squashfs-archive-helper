@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
 # Assert uri_to_path() in src/squish-common.sh against KIO file:// URIs.
 
+# shellcheck source=tests/helpers.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/helpers.bash"
+# shellcheck source=src/squish-common.sh
 source "$SRC/squish-common.sh"
 
 # log() in the sourced file reads PIPE_MODE; shellcheck cannot see across files.

@@ -4,8 +4,9 @@
 # marker file models "is this path mounted" and the tracker bookkeeping is what
 # gets asserted.
 
+# shellcheck source=tests/helpers.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/helpers.bash"
-# shellcheck source=./stubs.bash
+# shellcheck source=tests/stubs.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/stubs.bash"
 
 mounts_dir="$XDG_RUNTIME_DIR/squish-mounts"
@@ -17,7 +18,7 @@ make_archive() { # an archive plus its checksum.
   # squashfuse is modelled on PATH, so nothing here reads the bytes as SquashFS:
   # the archive half is a plain file and the suite pays no archival cost.
   printf 'payload\n' >"$WORK/data/one.sqsh"
-  ( cd "$WORK/data" && sha256sum one.sqsh ) >"$WORK/data/one.sqsh.sha256"
+  (cd "$WORK/data" && sha256sum one.sqsh) >"$WORK/data/one.sqsh.sha256"
 }
 
 # bats runs the file top level once per test, so the fixture is declared here
@@ -54,7 +55,7 @@ make_archive
   grep -q 'Unmounted successfully' <<<"$OUT"
   [[ $(count_trackers) -eq 0 ]]
   [[ ! -d "$mounts_dir" ]]
-  ! is_mount_marked "$mounts_dir/one.01.mounted"
+  run ! is_mount_marked "$mounts_dir/one.01.mounted"
 }
 
 @test "--list-mounts prints the archive to mountpoint pair" {

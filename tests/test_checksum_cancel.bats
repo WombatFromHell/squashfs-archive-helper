@@ -4,8 +4,12 @@
 # squish says on stderr. The stub yad records its argv, so the dialog text is
 # inspectable; YAD_EXIT models the user closing the window.
 
+# bats runs every test in its own subshell, so exporting a fixture variable is
+# local to that test on purpose — the stub yad reads it from the environment.
+# shellcheck disable=SC2030,SC2031
+# shellcheck source=tests/helpers.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/helpers.bash"
-# shellcheck source=./stubs.bash
+# shellcheck source=tests/stubs.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/stubs.bash"
 
 export DIALOGLOG="$WORK/dialog-args.log"
@@ -17,7 +21,7 @@ make_archives() { # clean pair plus the same pair with one byte appended.
   # squashfuse runs), so the archive half is a plain file: hashing, copying and
   # tampering are what the assertions exercise.
   printf 'payload\n' >"$WORK/data/good.sqsh"
-  ( cd "$WORK/data" && sha256sum good.sqsh ) >"$WORK/data/good.sqsh.sha256"
+  (cd "$WORK/data" && sha256sum good.sqsh) >"$WORK/data/good.sqsh.sha256"
   cp "$WORK/data/good.sqsh" "$WORK/data/bad.sqsh"
   cp "$WORK/data/good.sqsh.sha256" "$WORK/data/bad.sqsh.sha256"
   printf 'tampered\n' >>"$WORK/data/bad.sqsh"
@@ -48,7 +52,7 @@ dialog_says_failed() { grep -qi 'FAILED' "$DIALOGLOG"; }
   : >"$DIALOGLOG"
   run_squish -m good.sqsh
   [[ $RC -ne 0 ]]
-  ! dialog_says_failed
+  run ! dialog_says_failed
   grep -qi 'cancel' <<<"$OUT"
   [[ $(count_trackers) -eq 0 ]]
   [[ ! -e "$XDG_RUNTIME_DIR/squish-mounts/good.01.mounted" ]]
@@ -58,6 +62,6 @@ dialog_says_failed() { grep -qi 'FAILED' "$DIALOGLOG"; }
   export YAD_EXIT=3
   : >"$DIALOGLOG"
   run_squish --check good.sqsh
-  ! dialog_says_failed
+  run ! dialog_says_failed
   [[ $RC -ne 0 ]]
 }

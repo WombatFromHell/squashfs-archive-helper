@@ -155,3 +155,27 @@ EOF
 
   chmod +x "$WORK/stub/mksquashfs" "$WORK/stub/unsquashfs"
 }
+
+stub_mksquashfs_argv() { # mksquashfs that records each invocation's argv in $MKLOG
+  export MKLOG
+  cat >"$WORK/stub/mksquashfs" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$MKLOG"
+# A model that produced no archive would be a real error; squish hashes it next.
+[[ -e "$2" ]] || : >"$2"
+exit 0
+EOF
+  chmod +x "$WORK/stub/mksquashfs"
+}
+
+stub_yad_prompt() { # yad form that answers $PROMPT_REPLY and exits $YAD_EXIT
+  export PROMPT_REPLY YAD_EXIT
+  cat >"$WORK/stub/yad" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" == *--form* ]] && printf '%s\n' "$PROMPT_REPLY"
+# Only a progress gauge gets a stdin feed; an unconditional read would block.
+[[ "$*" == *--progress* ]] && cat >/dev/null
+exit "${YAD_EXIT:-0}"
+EOF
+  chmod +x "$WORK/stub/yad"
+}

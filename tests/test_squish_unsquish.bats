@@ -3,6 +3,7 @@
 # --pipe keeps every case on the machine-readable path, so the YAD/Zenity GUI
 # is never opened.
 
+# shellcheck source=tests/helpers.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/helpers.bash"
 
 TODAY="$(date +%Y%m%d)"

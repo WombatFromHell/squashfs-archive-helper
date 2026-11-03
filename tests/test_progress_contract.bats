@@ -3,8 +3,9 @@
 # The model emitter is checked against the real tools, then squish/unsquish run
 # through run_with_dialog so the dialog receipt is asserted exactly.
 
+# shellcheck source=tests/helpers.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/helpers.bash"
-# shellcheck source=./stubs.bash
+# shellcheck source=tests/stubs.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/stubs.bash"
 
 mkdir -p "$WORK/tree"
@@ -82,7 +83,7 @@ first_block_ints() {
   run_with_dialog "$WORK/stub/mksquashfs" "$WORK/tree" "$WORK/out.sqsh" -no-xattrs -percentage -- "$WORK/stub/yad" --progress 2>"$WORK/err"
   [[ $(dialog_blocks) -eq 1 ]]
   [[ $(first_block_ints) == "10 50 100 " ]]
-  ! grep -qE '^[0-9]+$' "$WORK/err"
+  run ! grep -qE '^[0-9]+$' "$WORK/err"
   grep -q 'model emitter' "$WORK/err"
 }
 
@@ -113,7 +114,7 @@ EOF
   use_stub_dir
   : >"$RECEIPT"
   bash "$SRC/squish.sh" "$WORK/tree" -o "$WORK/e2e.sqsh" 2>"$WORK/e2e-err" >/dev/null
-  ! grep -qE '^[0-9]+$' "$WORK/e2e-err"
+  run ! grep -qE '^[0-9]+$' "$WORK/e2e-err"
   [[ $(first_block_ints) =~ [0-9] ]]
 }
 
@@ -122,6 +123,6 @@ EOF
   bash "$SRC/squish.sh" "$WORK/tree" -o "$WORK/e2e.sqsh" >/dev/null 2>&1
   : >"$RECEIPT"
   bash "$SRC/unsquish.sh" "$WORK/e2e.sqsh" -o "$WORK/e2e-out" 2>"$WORK/e2e-out-err" >/dev/null
-  ! grep -qE '^[0-9]+$' "$WORK/e2e-out-err"
+  run ! grep -qE '^[0-9]+$' "$WORK/e2e-out-err"
   [[ $(first_block_ints) =~ [0-9] ]]
 }
