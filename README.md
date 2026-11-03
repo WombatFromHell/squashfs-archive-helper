@@ -4,11 +4,11 @@ A set of bash wrappers with KDE service-menu integration for managing SquashFS a
 
 ## Features
 
-- **High Compression**: Uses `zstd` (level 19) with 1MB blocks for optimal space savings.
+- **High Compression**: Uses `zstd` (level 19 by default, `squish -c <n>`) with 1MB blocks for optimal space savings.
 - **Integrity First**: Automatically generates and verifies `.sha256` checksums during creation, extraction, and mounting.
 - **FUSE Mounting**: Seamlessly mount/unmount SquashFS images using `squashfuse` without root privileges.
 - **Adaptive UI**: Displays graphical progress bars via `yad` or `zenity` when available, falling back to a detailed CLI view.
-- **Desktop Integration**: Includes a `.desktop` file for KDE (Dolphin/Konqueror) context menu actions: **Build**, **Extract**, **Mount**, and **Unmount**.
+- **Desktop Integration**: Includes a `.desktop` file for KDE (Dolphin/Konqueror) context menu actions: **Verify**, **Extract**, **Mount**, **Unmount**, **Build**, and **Build with options**. Each file's actions are grouped into one **Squish** submenu (`X-KDE-Submenu`) placed at the top level of the menu (`X-KDE-Priority=TopLevel`) rather than inside KDE's **Actions** submenu.
 
 ## Dependencies
 
@@ -24,6 +24,12 @@ A set of bash wrappers with KDE service-menu integration for managing SquashFS a
 ```bash
 # Create an archive from one or more directories
 squish /path/to/data -o backup.sqsh
+
+# Create an archive with a faster compression level
+squish /path/to/data -o backup.sqsh -c 3
+
+# Ask for the archive name and level in a dialog first (KDE: "Build with options")
+squish --prompt /path/to/data
 
 # Mount an archive to a managed mountpoint (auto-verifies checksum)
 squish -m backup.sqsh
