@@ -2,8 +2,15 @@
 Type=Service
 ServiceTypes=KonqPopupMenu/Plugin
 MimeType=application/x-squashfs;application/x-squashfs-image;application/vnd.squashfs;
-Actions=extract-squashfs;mount-squashfs;unmount-squashfs;
+Actions=verify-squashfs;extract-squashfs;mount-squashfs;unmount-squashfs;
+X-KDE-Submenu=Squish
+X-KDE-Priority=TopLevel
 Icon=utilities-file-archiver
+
+[Desktop Action verify-squashfs]
+Name=Verify
+Icon=dialog-ok
+Exec=squish --check %f
 
 [Desktop Action extract-squashfs]
 Name=Extract
