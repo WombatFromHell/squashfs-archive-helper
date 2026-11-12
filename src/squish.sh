@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+# -m gives our tool children their own process group, so a cancel can signal the
+# whole group; without it bash makes background children ignore SIGTERM.
+set -euo pipefail -m
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$(realpath -- "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=src/squish-common.sh
@@ -85,6 +87,9 @@ generate_checksum() {
   base="$(basename "$file")"
   log info "Generating SHA-256 checksum for '$base'..."
   hash_with_progress "$file" "SquashFS Archival" || exit 1
+  # A cancel that landed during the hash stops here: the archive is complete,
+  # but this run does not finish the pair.
+  [[ $CANCELLED -eq 1 ]] && return 0
   printf '%s  %s\n' "$HASH_RESULT" "$base" >"${file}.sha256"
 }
 
@@ -102,9 +107,7 @@ generate_checksum() {
 # nothing.
 #######################################
 
-get_tracker_dir() {
-  echo "${XDG_RUNTIME_DIR:-/tmp}"
-}
+get_tracker_dir() { runtime_root; }
 
 get_mounts_dir() {
   echo "$(get_tracker_dir)/$MOUNTS_FOLDER"
@@ -667,8 +670,7 @@ parse_arguments() {
 
   case "$action" in
   cancel)
-    cancel_archive "$(realpath "$(uri_to_path "$action_arg")")" || exit 1
-    exit 0
+    cancel_or_exit "$action_arg"
     ;;
   check)
     run_check "$action_arg" "SquashFS Archival"
@@ -717,6 +719,16 @@ main() {
   # build contends with an extraction or mount of the same file.
   acquire_archive_lock "$OUTPUT_FILE" || exit $?
 
+  # The lock is released when the mount command exits, so a mount that is still
+  # live has to be asked about directly: this build would truncate it under the mount.
+  local -a live_mounts=()
+  mapfile -t live_mounts < <(live_trackers_for_archive "$OUTPUT_FILE")
+  if [[ ${#live_mounts[@]} -gt 0 ]]; then
+    log error "'$OUTPUT_FILE' is mounted at '$(read_tracker_mountpoint "${live_mounts[0]}")'."
+    log error "Unmount first with: $SCRIPT_NAME -u '$OUTPUT_FILE'"
+    exit 1
+  fi
+
   local exit_code=0
 
   compress_backend_args
@@ -732,6 +744,12 @@ main() {
   fi
 
   generate_checksum "$OUTPUT_FILE"
+  # A signal that landed during the hash must not report a finished build. The
+  # archive it just wrote is complete, so it is kept; only the pair is missing.
+  if [[ $CANCELLED -eq 1 ]]; then
+    log warn "Build cancelled before the checksum was written; '$OUTPUT_FILE' has no '.sha256' pair."
+    exit 2
+  fi
   log info "Checksum written to '${OUTPUT_FILE}.sha256'."
   log info "Successfully created '$OUTPUT_FILE'."
 }

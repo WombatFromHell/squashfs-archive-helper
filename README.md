@@ -77,6 +77,9 @@ unsquish backup.sqsh           # holds backup.sqsh until it finishes
 unsquish backup.sqsh -o other  # [ERROR] ... is running (pid ...); exit 3
 ```
 
+A rebuild of an archive that is currently mounted is refused the same way (exit 1):
+the mount outlives the mount command, so unmount it first.
+
 To stop the run that holds it — the backend is stopped with it, and the partial
 output is cleaned up:
 
@@ -85,7 +88,8 @@ unsquish --cancel backup.sqsh   # or: squish --cancel backup.sqsh
 ```
 
 A cancelled run exits `2`; a stale lock left by a killed process is reclaimed by the
-next command.
+next command. A build cancelled during its checksum keeps the archive it already
+wrote — it simply has no `.sha256` pair.
 
 The yazi plugin refuses the same way, shows which process is busy, and offers `n c` to
 stop an extract or mount of the archive under the cursor. A build is locked by its

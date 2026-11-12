@@ -3,6 +3,7 @@ VERSION = 1.6.7
 #
 SRC_DIR = src
 ASSET_DIR = assets
+TEST_DIR = tests
 #
 DIST_DIR = dist
 BUILD_DIR = $(DIST_DIR)/$(PROJECT)
@@ -36,7 +37,7 @@ lint:
 	shellcheck ./src/*.sh ./tests/*.bash ./tests/*.bats
 
 format: lint
-	shfmt -i 2 -w $$(find $(SRC_DIR) $(ASSET_DIR) -type f -name "*.sh" -o -type f -name "*.bats")
+	shfmt -i 2 -w $$(find $(SRC_DIR) $(ASSET_DIR) $(TEST_DIR) -type f \( -name "*.sh" -o -name "*.bash" -o -name "*.bats" \))
 	prettier -w ./*.md ./.github/workflows/*.yml
 
 test:

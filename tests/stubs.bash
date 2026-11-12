@@ -218,6 +218,20 @@ EOF
   chmod +x "$WORK/stub/pv"
 }
 
+stub_pv_slow() { # pv model that holds for $SLEEP seconds, so a suite can aim a
+  # cancel at the hashing phase rather than at the tool being compressed
+  export SLOWPV_SLEEP="${SLOWPV_SLEEP:-3}"
+  cat >"$WORK/stub/pv" <<'EOF'
+#!/usr/bin/env bash
+printf '10\n' >&2
+sleep "${SLOWPV_SLEEP:-3}"
+printf '100\n' >&2
+cat "${*: -1}"
+exit 0
+EOF
+  chmod +x "$WORK/stub/pv"
+}
+
 stub_mksquashfs_argv() { # mksquashfs that records each invocation's argv in $MKLOG
   export MKLOG
   cat >"$WORK/stub/mksquashfs" <<'EOF'

@@ -106,7 +106,7 @@ exit 3
 EOF
   chmod +x "$WORK/stub/cancelling"
   RC=0
-  run_with_dialog "$WORK/stub/mksquashfs" x -- "$WORK/stub/cancelling" 2>/dev/null || RC=$?
+  run_with_dialog "$WORK/stub/mksquashfs" "$WORK/x" -- "$WORK/stub/cancelling" 2>/dev/null || RC=$?
   [[ $RC -eq 3 ]]
 }
 

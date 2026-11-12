@@ -136,10 +136,14 @@ show_progress() {
 # ONE OPERATION PER ARCHIVE
 #######################################
 
+# Locks and mount trackers share one per-user runtime dir, so the rule is written
+# once here: a change to it moves both together.
+runtime_root() { echo "${XDG_RUNTIME_DIR:-/tmp}"; }
+
 # Locks live in the same per-user runtime dir as the mount trackers, so a lock
 # never sits next to the archive (it would show up in listings and cannot be
 # created on a read-only share).
-lock_root() { echo "${XDG_RUNTIME_DIR:-/tmp}/squish-locks"; }
+lock_root() { echo "$(runtime_root)/squish-locks"; }
 
 # Usage: lock_dir_for <absolute-path>
 # The archive path is an operation's identity, so squish and unsquish contend on
@@ -151,6 +155,11 @@ lock_dir_for() {
 
 # Set while this run owns a lock.
 declare LOCK_PID=""
+
+# A pid is alive when /proc says so. `kill -0` is not the question: it also fails
+# on a live process owned by another user (EPERM), which would make this run
+# reclaim a lock somebody else is holding.
+lock_pid_alive() { [[ -d "/proc/$1" ]]; }
 
 # Usage: release_archive_lock
 # Only the owner removes the lock, and the function always returns 0: a failing
@@ -180,7 +189,7 @@ acquire_archive_lock() {
   fi
 
   pid="$(readlink "$dir/pid" 2>/dev/null || true)"
-  if [[ -n $pid ]] && ! kill -0 "$pid" 2>/dev/null; then
+  if [[ -n $pid ]] && ! lock_pid_alive "$pid"; then
     # A run killed hard left a stale lock behind; take it and try once more.
     rm -f "$dir/pid"
     if ln -s "$BASHPID" "$dir/pid" 2>/dev/null; then
@@ -203,16 +212,32 @@ acquire_archive_lock() {
 # trap takes its backend down with it and exits 2, the existing "cancelled, not
 # corrupted" code.
 cancel_archive() {
-  local dir pid
+  local dir pid cmd
   dir="$(lock_dir_for "$1")"
   pid="$(readlink "$dir/pid" 2>/dev/null || true)"
-  if [[ -z $pid ]] || ! kill -0 "$pid" 2>/dev/null; then
+  if [[ -z $pid ]] || ! lock_pid_alive "$pid"; then
     log error "Nothing running for '$1'."
+    return 1
+  fi
+
+  # A lock is a pid number, and a number proves nothing about who owns it: one
+  # recycled after a hard kill would be the user's browser.
+  cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+  if [[ $cmd != *squish.sh* && $cmd != *unsquish.sh* ]]; then
+    log error "Lock pid $pid is not a squish run; refusing to kill it."
     return 1
   fi
 
   log info "Cancelling the operation on '$1' (pid $pid)."
   kill -TERM "$pid"
+}
+
+# Usage: cancel_or_exit <archive-path>
+# The shared --cancel tail of both scripts: resolve a possible KIO URI, stop
+# whoever holds the lock, and make the outcome this run's exit code.
+cancel_or_exit() {
+  cancel_archive "$(realpath "$(uri_to_path "$1")")" || exit 1
+  exit 0
 }
 
 #######################################
@@ -229,7 +254,12 @@ declare -i CANCELLED=0
 # that spawns a long child sets BACKEND_PID, so one trap covers hash, build and
 # extract alike.
 install_cancel_trap() {
-  trap '[[ -n $BACKEND_PID ]] && kill "$BACKEND_PID" 2>/dev/null; CANCELLED=1' TERM INT
+  # The handler must never fail: under `set -e` a failing kill would abort the
+  # run with status 1 instead of the cancelled code 2. The kill aims at the
+  # child's process group, which needs the sourcing script's `set -m`.
+  # shortcut: TERM/INT only — a SIGKILL aimed at this script leaves its tool
+  # running; upgrade to killing the whole process group if anyone uses -9.
+  trap 'CANCELLED=1; [[ -n $BACKEND_PID ]] && kill -- -"$BACKEND_PID" 2>/dev/null || true' TERM INT
 }
 
 # Usage: pipe_progress <cmd args...>
@@ -280,7 +310,7 @@ run_with_dialog() {
     [[ $seen -eq 0 ]] && backend+=("$arg") || dialog+=("$arg")
   done
 
-  local status_file fifo pipe_pid
+  local status_file fifo pipe_pid dialog_pid
   status_file=$(mktemp)
   fifo=$(mktemp -u)
   mkfifo "$fifo"
@@ -299,14 +329,34 @@ run_with_dialog() {
       while IFS= read -r p; do printf '%s\n' "$p" >&3 2>/dev/null || :; done
     } &
   pipe_pid=$!
+  # The dialog's backend is this pipeline, so the cancel trap has to aim at the
+  # drain: killing it propagates SIGPIPE drain -> grep -> tee -> backend.
+  BACKEND_PID="$pipe_pid"
 
-  "${dialog[@]}" <"$fifo"
-  local dialog_exit=$?
+  # A dialog in the foreground would defer the cancel trap until it closes, so
+  # the run would finish instead of stopping. As a background job, `wait` returns
+  # as soon as the signal lands.
+  "${dialog[@]}" <"$fifo" &
+  dialog_pid=$!
+  local dialog_exit=0
+  wait "$dialog_pid" || dialog_exit=$?
+  BACKEND_PID=""
+
+  # A cancel signal already took the drain down; the dialog gets EOF, and one
+  # that ignores it is closed outright. The run's contract is exit 2
+  # ("cancelled"), whatever the backend or dialog reported in that race.
+  if [[ $CANCELLED -eq 1 ]]; then
+    kill -- -"$dialog_pid" -"$pipe_pid" 2>/dev/null || true
+    wait "$dialog_pid" 2>/dev/null || true
+    wait "$pipe_pid" 2>/dev/null || true
+    rm -f "$status_file" "$fifo"
+    return 2
+  fi
 
   if [[ $dialog_exit -ne 0 ]]; then
-    # ponytail: killing the drain subshell suffices; SIGPIPE propagates
+    # ponytail: killing the pipeline's group suffices; SIGPIPE propagates
     # drain -> grep -> tee -> backend and kills it.
-    kill "$pipe_pid" 2>/dev/null || true
+    kill -- -"$pipe_pid" 2>/dev/null || true
     wait "$pipe_pid" 2>/dev/null || true
     rm -f "$status_file" "$fifo"
     return "$dialog_exit"
@@ -475,7 +525,7 @@ hash_with_progress() {
       --width=450 \
       --borders=15 \
       --bar-style=normal <"$fifo"; then
-      kill "$pid" 2>/dev/null || true
+      kill -- -"$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
       rm -f "$fifo" "$tmp"
       return 2

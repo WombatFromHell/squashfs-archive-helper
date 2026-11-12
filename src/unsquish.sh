@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+# -m gives our tool children their own process group, so a cancel can signal the
+# whole group; without it bash makes background children ignore SIGTERM.
+set -euo pipefail -m
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$(realpath -- "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=src/squish-common.sh
@@ -186,8 +188,7 @@ parse_arguments() {
     if [[ -z $action_arg ]]; then
       missing_option_value "--cancel"
     fi
-    cancel_archive "$(realpath "$action_arg")" || exit 1
-    exit 0
+    cancel_or_exit "$action_arg"
   fi
 
   if [[ $action == check ]]; then

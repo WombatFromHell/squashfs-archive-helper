@@ -36,3 +36,16 @@ run_unsquish_in() {
 run_squish() { run_squish_in "$WORK/data" "$@"; }
 
 count_trackers() { find "$XDG_RUNTIME_DIR" -maxdepth 1 -name '*.[0-9][0-9].mounted' | wc -l; }
+
+# The lock layout belongs to the scripts, so a fixture asks it instead of
+# restating the path-escaping rule.
+# shellcheck source=src/squish-common.sh
+source "$SRC/squish-common.sh"
+
+plant_lock() { # $1 = archive path, $2 = pid to name in the lock symlink: lets a
+  # test aim --cancel, or a contending run, at a lock it did not earn.
+  local dir
+  dir="$(lock_dir_for "$1")"
+  mkdir -p "$dir"
+  ln -s "$2" "$dir/pid"
+}

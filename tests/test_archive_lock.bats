@@ -161,3 +161,96 @@ lock_entries() { find "$XDG_RUNTIME_DIR/squish-locks" -name pid | wc -l; }
   [[ $RC -eq 1 ]]
   grep -q "Nothing running" <<<"$OUT"
 }
+
+# A lock names a pid, and a pid number is not proof of who owns it.
+@test "--cancel refuses a lock pid that is not a squish run" {
+  new_archive
+  plant_lock "$WORK/a.sqsh" "$$" # this bats shell: alive, and not a squish run
+
+  run_unsquish_in "$WORK" --cancel "$WORK/a.sqsh"
+  [[ $RC -eq 1 ]]
+  grep -q "not a squish run" <<<"$OUT"
+  run ! grep -q "Cancelling" <<<"$OUT"
+  kill -0 "$$" # the planted process survived
+}
+
+# kill -0 fails on a live process owned by someone else (EPERM), so it cannot be
+# the staleness test: another user's run must read as busy, not stale.
+@test "a lock naming a live pid we cannot signal is busy, not stale" {
+  new_archive
+  plant_lock "$WORK/a.sqsh" 1 # systemd: alive, EPERM for us
+
+  run_unsquish_in "$WORK" --pipe "$WORK/a.sqsh" -o "$WORK/out1"
+  [[ $RC -eq 3 ]]
+  grep -q "is running (pid 1)" <<<"$OUT"
+  [[ ! -e $WORK/out1 ]]
+}
+
+# The desktop path runs its backend inside a pipeline, so cancel has to reach the
+# tool there too, and the run must report 'cancelled' (2), not a SIGPIPE code.
+@test "--cancel stops a GUI build and exits 2" {
+  mkdir -p "$WORK/plain"
+  printf 'hello\n' >"$WORK/plain/a.txt"
+  stub_slow_emitters
+  stub_yad_receipt
+  use_stub_dir
+
+  start "$WORK" squish.sh "$WORK/plain" -o "$WORK/new.sqsh"
+  wait_for_lock
+
+  run_unsquish_in "$WORK" --cancel "$WORK/new.sqsh"
+  [[ $RC -eq 0 ]]
+  grep -q "Cancelling" <<<"$OUT"
+
+  FIRST_RC=0
+  wait "$START_PID" || FIRST_RC=$?
+  [[ $FIRST_RC -eq 2 ]]
+  [[ ! -e $WORK/new.sqsh ]]
+  run ! grep -q 'end' "$RUNLOG" # the backend never reached its final line
+  [[ $(lock_entries) -eq 0 ]]
+}
+
+# A signal during the build's hash must not go on to report a finished build.
+@test "--cancel during the build's hash exits 2" {
+  mkdir -p "$WORK/plain"
+  printf 'hello\n' >"$WORK/plain/a.txt"
+  SLEEP=0.4 stub_slow_emitters
+  SLOWPV_SLEEP=2 stub_pv_slow
+  use_stub_dir
+
+  start "$WORK" squish.sh --pipe "$WORK/plain" -o "$WORK/new.sqsh"
+  # Wait for the compression to finish, so the signal lands inside the hash.
+  attempts=100
+  while ((attempts-- > 0)) && [[ ! -e $WORK/new.sqsh ]]; do sleep 0.05; done
+  [[ -e $WORK/new.sqsh ]]
+
+  run_squish_in "$WORK" --cancel "$WORK/new.sqsh"
+  [[ $RC -eq 0 ]]
+
+  FIRST_RC=0
+  wait "$START_PID" || FIRST_RC=$?
+  [[ $FIRST_RC -eq 2 ]]
+  run ! grep -q "Successfully created" "$WORK/run.out"
+  [[ ! -e "$WORK/new.sqsh.sha256" ]]
+  [[ -e $WORK/new.sqsh ]] # the completed archive is kept; only the run stopped
+}
+
+# The lock covers a mount against a build, but the mount outlives the mount
+# command, so the build has to ask about live trackers itself.
+@test "a build refuses while its output archive is mounted" {
+  new_archive
+  mount_model_fuse "$WORK/mark"
+  stub_mksquashfs_argv
+  use_stub_dir
+
+  run_squish_in "$WORK" --pipe -m "$WORK/a.sqsh"
+  [[ $RC -eq 0 ]]
+  [[ $(count_trackers) -eq 1 ]]
+
+  run_squish_in "$WORK" --pipe "$WORK/plain" -o "$WORK/a.sqsh"
+  [[ $RC -eq 1 ]]
+  grep -q "mounted at" <<<"$OUT"
+  grep -q "Unmount first" <<<"$OUT"
+  [[ ! -e $MKLOG ]] # mksquashfs never ran
+  [[ $(count_trackers) -eq 1 ]]
+}
