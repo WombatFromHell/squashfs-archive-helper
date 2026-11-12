@@ -126,16 +126,26 @@ stub_progress_emitters() { # mksquashfs/unsquashfs stand-ins that print bare per
   cat >"$WORK/stub/mksquashfs" <<'EOF'
 #!/usr/bin/env bash
 have_pct=0 have_info=0
+out=""
+flags_on=0
+# mksquashfs argv is <sources...> <output> <flags...>. Flags start at the first
+# argument beginning with '-', so the output is the last positional before it
+# (everything after that first flag is a flag or its value).
 for a in "$@"; do
-  case "$a" in
-    -percentage) have_pct=1 ;;
-    -info) have_info=1 ;;
-  esac
+  if [[ $a == -* ]]; then flags_on=1; fi
+  if [[ $flags_on -eq 1 ]]; then
+    case "$a" in
+      -percentage) have_pct=1 ;;
+      -info) have_info=1 ;;
+    esac
+    continue
+  fi
+  out="$a"
 done
 printf 'Parallel model emitter\nCreating filesystem.\n'
 if [[ $have_pct -eq 1 && $have_info -eq 0 ]]; then printf '10\n50\n100\n'; fi
 # An emitter that produced no archive would be a real error; model must write one.
-[[ -e "$2" ]] || : >"$2"
+[[ -e "$out" ]] || : >"$out"
 exit 0
 EOF
 
@@ -156,13 +166,73 @@ EOF
   chmod +x "$WORK/stub/mksquashfs" "$WORK/stub/unsquashfs"
 }
 
+# mksquashfs/unsquashfs models that hold for $SLEEP seconds, so a suite can aim
+# a second run at the same archive while the first is still busy. Each writes its
+# life to $RUNLOG: 'end' present means the backend ran to completion, absent
+# means it was killed.
+stub_slow_emitters() {
+  export RUNLOG
+  cat >"$WORK/stub/mksquashfs" <<'EOF'
+#!/usr/bin/env bash
+out=""
+flags_on=0
+for a in "$@"; do
+  [[ $a == -* ]] && flags_on=1
+  [[ $flags_on -eq 1 ]] && continue
+  out="$a"
+done
+printf 'start\n' >>"$RUNLOG"
+printf '10\n'
+sleep "${SLEEP:-2}"
+[[ -e "$out" ]] || : >"$out"
+printf '100\n'
+printf 'end\n' >>"$RUNLOG"
+EOF
+
+  cat >"$WORK/stub/unsquashfs" <<'EOF'
+#!/usr/bin/env bash
+dest=""
+prev=""
+for a in "$@"; do
+  [[ $prev == -d ]] && dest="$a"
+  prev="$a"
+done
+printf 'start\n' >>"$RUNLOG"
+printf '10\n'
+sleep "${SLEEP:-2}"
+[[ -n $dest ]] && mkdir -p "$dest" && : >"$dest/extracted.txt"
+printf '100\n'
+printf 'end\n' >>"$RUNLOG"
+EOF
+
+  chmod +x "$WORK/stub/mksquashfs" "$WORK/stub/unsquashfs"
+}
+
+stub_pv() { # pv model: copy the file to stdout, print bare percentages to stderr
+  cat >"$WORK/stub/pv" <<'EOF'
+#!/usr/bin/env bash
+printf '10\n50\n100\n' >&2
+cat "${*: -1}"
+exit 0
+EOF
+  chmod +x "$WORK/stub/pv"
+}
+
 stub_mksquashfs_argv() { # mksquashfs that records each invocation's argv in $MKLOG
   export MKLOG
   cat >"$WORK/stub/mksquashfs" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$MKLOG"
-# A model that produced no archive would be a real error; squish hashes it next.
-[[ -e "$2" ]] || : >"$2"
+out=""
+flags_on=0
+# squish hashes the archive next, so the model must write the output: the last
+# positional argument before the first flag of <sources...> <output> <flags...>.
+for a in "$@"; do
+  [[ $a == -* ]] && flags_on=1
+  [[ $flags_on -eq 1 ]] && continue
+  out="$a"
+done
+[[ -e "$out" ]] || : >"$out"
 exit 0
 EOF
   chmod +x "$WORK/stub/mksquashfs"

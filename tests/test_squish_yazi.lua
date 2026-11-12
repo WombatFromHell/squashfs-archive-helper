@@ -30,14 +30,19 @@ end
 
 -- ── yazi runtime stubs ───────────────────────────────────────────────────────
 local NOTIFS = {}
+local LEVELS = {}
 local EMITS = {}
 local DRY = false
 local RECORDED = {}
 local FAKE_POPEN
+local FAKE_STATUS
 
 ya = {
   sync = function(fn) return fn end,
-  notify = function(t) NOTIFS[#NOTIFS + 1] = t.content end,
+  notify = function(t)
+    NOTIFS[#NOTIFS + 1] = t.content
+    LEVELS[#LEVELS + 1] = t.level
+  end,
   emit = function(event) EMITS[#EMITS + 1] = event end,
   quote = shquote,
   input = function() return "/tmp/extract_pick_dir", 1 end,
@@ -96,6 +101,16 @@ Command = setmetatable({}, {
         if v == "-c" then cmd = self.argv[i + 1]; break end
       end
       cmd = cmd or table.concat(self.argv, " ")
+      if FAKE_STATUS then
+        -- A canned exit code, so a suite can assert how one code is reported.
+        return {
+          read_line = function() return nil, 2 end,
+          wait = function() return { success = FAKE_STATUS == 0, code = FAKE_STATUS } end,
+          wait_with_output = function()
+            return { status = { success = FAKE_STATUS == 0, code = FAKE_STATUS }, stderr = "", stdout = "" }
+          end,
+        }
+      end
       if DRY then
         RECORDED[#RECORDED + 1] = cmd
         return {
@@ -138,13 +153,16 @@ Command.PIPED = "PIPED"
 
 -- ── load plugin ──────────────────────────────────────────────────────────────
 local M = dofile(YAZI .. "/main.lua")
-M.setup({ squish_cmd = SRC .. "/squish", unsquish_cmd = SRC .. "/unsquish", timeout = 1 })
+-- yazi hands setup(context, opts); opts must land in the second slot, or the
+-- plugin keeps its defaults and the suite drives whatever `squish` is on PATH.
+M.setup(nil, { squish_cmd = SRC .. "/squish.sh", unsquish_cmd = SRC .. "/unsquish.sh", timeout = 1 })
 
 local function reset()
-  NOTIFS, EMITS, RECORDED = {}, {}, {}
+  NOTIFS, EMITS, RECORDED, LEVELS = {}, {}, {}, {}
   cx.active.selected, cx.active.current.hovered = {}, nil
 end
 local function last_cmd() return RECORDED[#RECORDED] end
+local function last_level() return LEVELS[#LEVELS] end
 local function notif_has(sub)
   for _, c in ipairs(NOTIFS) do if c:find(sub, 1, true) then return true end end
   return false
@@ -199,13 +217,13 @@ DRY = true
 reset()
 cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
 M.entry(nil, { args = { "mount" } })
-assert(last_cmd():match("squish%s+%-m%s+'" .. d1 .. "%.sqsh'"), "mount command built as `squish -m <file>`")
+assert(last_cmd():match("squish%.sh%s+%-%-pipe%s+%-m%s+'" .. d1 .. "%.sqsh'"), "mount command built as `squish --pipe -m <file>`")
 assert(notif_has("Mounted successfully"), "mount notifies success")
 
 reset()
 cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
 M.entry(nil, { args = { "unmount" } })
-assert(last_cmd():match("squish%s+%-u%s+'" .. d1 .. "%.sqsh'"), "unmount command built as `squish -u <file>`")
+assert(last_cmd():match("squish%.sh%s+%-u%s+'" .. d1 .. "%.sqsh'"), "unmount command built as `squish -u <file>`")
 DRY = false
 
 -- ── non-.sqsh hovered for extract -> NEED_SQSH ──────────────────────────────
@@ -219,7 +237,7 @@ DRY = true
 reset()
 FAKE_POPEN = { "/home/u/archive.sqsh -> /tmp/squish-mounts/archive.01.mounted" }
 M.entry(nil, { args = { "unmount-tracked" } })
-assert(last_cmd():match("squish%s+%-u%s+'/home/u/archive%.sqsh'"),
+assert(last_cmd():match("squish%.sh%s+%-u%s+'/home/u/archive%.sqsh'"),
   "unmount-tracked parses mounts and builds `squish -u <archive>`")
 FAKE_POPEN = nil
 DRY = false
@@ -230,6 +248,79 @@ FAKE_POPEN = { "/home/u/archive.sqsh -> /tmp/squish-mounts/archive.01.mounted" }
 M.entry(nil, { args = { "jump" } })
 assert(EMITS[#EMITS] == "tab_create", "jump emits tab_create")
 FAKE_POPEN = nil
+
+-- ── hash phase shows up, and a second phase restarts the counter ────────────
+-- A fixture emitter stands in for squish/unsquish so the phase lines are exact:
+-- hash 10/50/100, then extract 30/100. Without a per-phase reset, the extract
+-- 30 would be suppressed by the hash run's last_pct.
+local emitter = os.tmpname()
+local ef = io.open(emitter, "w")
+ef:write("#!/bin/sh\nprintf 'phase hash\n10\n50\n100\nphase extract\n30\n100\n'\n")
+ef:close()
+os.execute("chmod +x " .. shquote(emitter))
+M.setup(nil, { squish_cmd = emitter, unsquish_cmd = emitter, timeout = 1 })
+
+reset()
+local d2 = os.tmpname(); os.remove(d2); os.execute("mkdir -p " .. shquote(d2))
+cx.active.selected = { d2 }
+M.entry(nil, { args = { "build" } })
+assert(notif_has("Hashing: 40%"), "build shows hash progress")
+assert(notif_has("Hashing: 100%"), "build shows hash completion")
+assert(notif_has("Built"), "build (emitter) still notifies success")
+
+reset()
+cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
+M.entry(nil, { args = { "extract" } })
+assert(notif_has("Hashing: 40%"), "extract shows the verify-hash phase")
+assert(notif_has("Extracting: 20%"), "extract restarts its counter after hashing")
+assert(notif_has("Extracted successfully"), "extract (emitter) still notifies success")
+local hash_at, extract_at = 0, 0
+for i, c in ipairs(NOTIFS) do
+  if c:find("Hashing", 1, true) and hash_at == 0 then hash_at = i end
+  if c:find("Extracting", 1, true) and extract_at == 0 then extract_at = i end
+end
+assert(hash_at > 0 and hash_at < extract_at, "hash progress comes before extract progress")
+
+reset()
+cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
+M.entry(nil, { args = { "mount" } })
+assert(notif_has("Hashing: 40%"), "mount shows hash progress instead of a stray dialog")
+assert(notif_has("Mounted successfully"), "mount (emitter) notifies success")
+
+-- ── cancel: `unsquish --cancel <file>`, and exit code 2 reads as cancelled ──
+-- Code 2 is what unsquish returns when a run is stopped; telling the user
+-- "Extraction failed" over a partial directory they just cancelled is a lie.
+-- The emitter fixture above overwrote the commands, so name the real ones again.
+M.setup(nil, { squish_cmd = SRC .. "/squish.sh", unsquish_cmd = SRC .. "/unsquish.sh", timeout = 1 })
+DRY = true
+reset()
+cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
+M.entry(nil, { args = { "cancel" } })
+assert((last_cmd() or ""):match("unsquish%.sh%s+%-%-cancel%s+" .. shquote(d1 .. ".sqsh")),
+  "cancel command built as `unsquish --cancel <file>`")
+DRY = false
+
+reset()
+FAKE_STATUS = 2
+cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
+M.entry(nil, { args = { "extract" } })
+assert(notif_has("Cancelled"), "a cancelled extraction notifies Cancelled")
+assert(notif_has("Extracted successfully") == false, "a cancelled extraction is not a success")
+assert(last_level() == "info", "a cancelled extraction is not an error")
+FAKE_STATUS = nil
+
+reset()
+FAKE_STATUS = 1
+cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
+M.entry(nil, { args = { "extract" } })
+assert(notif_has("Extraction failed"), "a real failure still reports failure")
+assert(last_level() == "error", "a real failure is an error")
+FAKE_STATUS = nil
+
+reset()
+cx.active.current.hovered = { url = d1 .. "/x.txt", name = "x.txt", cha = { is_dir = false } }
+M.entry(nil, { args = { "cancel" } })
+assert(notif_has("Select a .sqsh file"), "cancel on non-sqsh rejects NEED_SQSH")
 
 -- ── unknown action / missing action ───────────────────────────────────────
 reset()

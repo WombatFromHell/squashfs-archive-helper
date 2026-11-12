@@ -6,6 +6,12 @@
 # Expects PIPE_MODE (declare -i, 0/1) to be defined by the sourcing script.
 #######################################
 
+# PROGRESS_PIPE says stdout is a progress stream (--pipe, not merely
+# machine-readable): only that mode puts hash percentages on stdout.
+# HASH_RESULT carries the hash out of band, so progress lines never mix into it.
+declare -i PROGRESS_PIPE=0
+declare HASH_RESULT=""
+
 #
 # Renderer contract: resolve_renderer decides once per run how progress reaches
 # the user, and everything downstream reads RENDERER. A script fills BACKEND_ARGS
@@ -48,13 +54,20 @@ missing_option_value() {
 # Both markers mean machine-readable output for the whole run: --pipe streams
 # progress, and squish's --print-mountpoint wants stdout to carry only a path.
 # Scanning before the renderer is chosen keeps that one decision for the run.
+# Only --pipe gets PROGRESS_PIPE: a path on stdout must not be interrupted by
+# percentage lines.
 pre_scan_pipe_mode() {
   local arg
   for arg in "$@"; do
-    if [[ $arg == "--pipe" || $arg == "--print-mountpoint" ]]; then
+    case "$arg" in
+    --pipe)
       PIPE_MODE=1
-      return 0
-    fi
+      PROGRESS_PIPE=1
+      ;;
+    --print-mountpoint)
+      PIPE_MODE=1
+      ;;
+    esac
   done
 }
 
@@ -120,13 +133,133 @@ show_progress() {
 }
 
 #######################################
+# ONE OPERATION PER ARCHIVE
+#######################################
+
+# Locks live in the same per-user runtime dir as the mount trackers, so a lock
+# never sits next to the archive (it would show up in listings and cannot be
+# created on a read-only share).
+lock_root() { echo "${XDG_RUNTIME_DIR:-/tmp}/squish-locks"; }
+
+# Usage: lock_dir_for <absolute-path>
+# The archive path is an operation's identity, so squish and unsquish contend on
+# the same key. '_' is escaped first, so '/a_b' and '/a/b' never share a lock.
+lock_dir_for() {
+  local escaped="${1//_/__}"
+  echo "$(lock_root)/${escaped//\//_}"
+}
+
+# Set while this run owns a lock.
+declare LOCK_PID=""
+
+# Usage: release_archive_lock
+# Only the owner removes the lock, and the function always returns 0: a failing
+# EXIT trap would replace the run's own exit status.
+release_archive_lock() {
+  if [[ -n $LOCK_PID ]] && [[ "$(readlink "$LOCK_PID" 2>/dev/null || true)" == "$BASHPID" ]]; then
+    rm -f "$LOCK_PID"
+  fi
+  LOCK_PID=""
+  return 0
+}
+
+# Usage: acquire_archive_lock <absolute-path>
+# The lock is a symlink to the owner's pid: `ln` claims it atomically with the
+# pid already recorded, so a second run can never read a half-written lock and
+# steal it. A lock whose pid is gone is stale and gets reclaimed. Returns 3 when
+# another run holds it — busy refuses rather than queues.
+acquire_archive_lock() {
+  local dir pid
+  dir="$(lock_dir_for "$1")"
+  mkdir -p "$dir"
+
+  if ln -s "$BASHPID" "$dir/pid" 2>/dev/null; then
+    LOCK_PID="$dir/pid"
+    trap release_archive_lock EXIT
+    return 0
+  fi
+
+  pid="$(readlink "$dir/pid" 2>/dev/null || true)"
+  if [[ -n $pid ]] && ! kill -0 "$pid" 2>/dev/null; then
+    # A run killed hard left a stale lock behind; take it and try once more.
+    rm -f "$dir/pid"
+    if ln -s "$BASHPID" "$dir/pid" 2>/dev/null; then
+      LOCK_PID="$dir/pid"
+      trap release_archive_lock EXIT
+      return 0
+    fi
+  fi
+
+  if [[ -z $pid ]]; then
+    log error "Another squish operation on '$1' is starting. Try again shortly."
+  else
+    log error "Another squish operation on '$1' is running (pid $pid). Stop it with --cancel."
+  fi
+  return 3
+}
+
+# Usage: cancel_archive <absolute-path>
+# The only way to free a busy archive is to stop the run holding it. That run's
+# trap takes its backend down with it and exits 2, the existing "cancelled, not
+# corrupted" code.
+cancel_archive() {
+  local dir pid
+  dir="$(lock_dir_for "$1")"
+  pid="$(readlink "$dir/pid" 2>/dev/null || true)"
+  if [[ -z $pid ]] || ! kill -0 "$pid" 2>/dev/null; then
+    log error "Nothing running for '$1'."
+    return 1
+  fi
+
+  log info "Cancelling the operation on '$1' (pid $pid)."
+  kill -TERM "$pid"
+}
+
+#######################################
 # PIPE MODE
 #######################################
 
+# Set while a tool child of this run is alive, and once a signal has hit it.
+declare BACKEND_PID=""
+declare -i CANCELLED=0
+
+# Usage: install_cancel_trap
+# A TERM/INT aimed at this script must stop whatever tool it is running, or that
+# tool keeps writing into a directory the script is about to delete. Every phase
+# that spawns a long child sets BACKEND_PID, so one trap covers hash, build and
+# extract alike.
+install_cancel_trap() {
+  trap '[[ -n $BACKEND_PID ]] && kill "$BACKEND_PID" 2>/dev/null; CANCELLED=1' TERM INT
+}
+
 # Usage: pipe_progress <cmd args...>
 # Machine-readable mode: bare percentage lines to stdout, rest to stderr.
+# The backend is a direct child writing to a FIFO, not half of a pipeline, so its
+# pid is known: a TERM/INT aimed at this script (Ctrl-C, yazi's start_kill,
+# --cancel) has to take the backend down too, and exit code 2 says "cancelled",
+# not "corrupted".
 pipe_progress() {
-  "$@" 2>&1 | awk '/^[0-9]+$/{print; fflush(); next} {print > "/dev/stderr"}'
+  local fifo backend_pid line rc=0
+  fifo="$(mktemp -u)"
+  mkfifo "$fifo"
+
+  "$@" >"$fifo" 2>&1 &
+  backend_pid=$!
+  BACKEND_PID="$backend_pid"
+
+  while IFS= read -r line; do
+    if [[ $line =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "$line"
+    else
+      printf '%s\n' "$line" >&2
+    fi
+  done <"$fifo"
+
+  wait "$backend_pid" || rc=$?
+  BACKEND_PID=""
+  rm -f "$fifo"
+  [[ $CANCELLED -eq 1 ]] && rc=2
+  return "$rc"
 }
 
 #######################################
@@ -228,8 +361,8 @@ verify_checksum_pair() {
   log info "Verifying '$target_basename' against '$checksum_file'..."
 
   expected="$(head -n1 "$checksum_abs" | awk '{print $1}')"
-  actual="$(hash_with_progress "$archive_abs" "$ui_title")"
-  hash_rc=$?
+  hash_with_progress "$archive_abs" "$ui_title" || hash_rc=$?
+  actual="$HASH_RESULT"
   if [[ $hash_rc -eq 2 ]]; then
     log warn "Checksum verification cancelled for '$target_basename'"
     return 2
@@ -304,15 +437,30 @@ check_archive() {
 }
 
 # Usage: hash_with_progress <file> <ui_title>
-# Streams a SHA-256 of <file>, showing a YAD progress bar when a GUI is
-# available (silent in --pipe mode). Prints the bare hash on stdout.
+# Hashes <file> and puts the bare hex in HASH_RESULT. Progress reaches the
+# renderer chosen for the run: --pipe emits a `phase hash` marker and bare
+# percentage lines on stdout, yad shows a gauge, everything else gets pv's bar.
 # Returns 2 when the progress dialog was closed or cancelled, 1 when hashing
 # itself failed.
 hash_with_progress() {
-  local file="$1" title="$2" tmp fifo
+  local file="$1" title="$2" tmp fifo rc=0
   tmp="$(mktemp)"
-  if [[ $RENDERER == pipe ]] || ! command -v pv &>/dev/null; then
-    sha256sum -- "$file" >"$tmp"
+  if [[ $PROGRESS_PIPE -eq 1 ]] && command -v pv &>/dev/null; then
+    # pv's percentage lines have to reach the script's stdout while its bytes
+    # go to sha256sum, so the progress stream is handed out on fd 4.
+    printf 'phase hash\n'
+    exec 4>&1
+    pv -n -i 0.5 -- "$file" 2>&4 | sha256sum >"$tmp" || rc=$?
+    exec 4>&-
+    if [[ $rc -ne 0 ]]; then
+      rm -f "$tmp"
+      return 1
+    fi
+  elif [[ $RENDERER == pipe ]] || ! command -v pv &>/dev/null; then
+    sha256sum -- "$file" >"$tmp" || {
+      rm -f "$tmp"
+      return 1
+    }
   elif [[ $RENDERER == yad ]]; then
     fifo="$(mktemp -u)"
     mkfifo "$fifo"
@@ -338,9 +486,12 @@ hash_with_progress() {
     fi
     rm -f "$fifo"
   else
-    pv "$file" | sha256sum >"$tmp"
+    pv "$file" | sha256sum >"$tmp" || {
+      rm -f "$tmp"
+      return 1
+    }
   fi
-  awk '{print $1}' "$tmp"
+  HASH_RESULT="$(awk '{print $1}' "$tmp")"
   rm -f "$tmp"
 }
 

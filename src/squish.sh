@@ -81,13 +81,11 @@ verify_archive_checksum() {
 }
 
 generate_checksum() {
-  local file="$1"
-  local dir base hash
-  dir="$(dirname "$file")"
+  local file="$1" base
   base="$(basename "$file")"
   log info "Generating SHA-256 checksum for '$base'..."
-  hash="$(cd "$dir" && hash_with_progress "$base" "SquashFS Archival")" || exit 1
-  printf '%s  %s\n' "$hash" "$base" >"${dir}/${base}.sha256"
+  hash_with_progress "$file" "SquashFS Archival" || exit 1
+  printf '%s  %s\n' "$HASH_RESULT" "$base" >"${file}.sha256"
 }
 
 #######################################
@@ -253,6 +251,10 @@ mount_archive() {
   archive_abs="$(realpath "$input")"
 
   require_existing_archive "$archive_abs" || exit 1
+
+  # One operation per archive: the lock is shared with unsquish, so an extraction
+  # or a build of this path cannot overlap the mount.
+  acquire_archive_lock "$archive_abs" || exit $?
 
   local candidates=()
   mapfile -t candidates < <(live_trackers_for_archive "$archive_abs")
@@ -586,6 +588,15 @@ parse_arguments() {
         shift
       fi
       ;;
+    --cancel)
+      action="cancel"
+      if is_option_value "${2:-}"; then
+        action_arg="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
     --list-mounts)
       action="list-mounts"
       shift
@@ -607,6 +618,7 @@ parse_arguments() {
       echo " $SCRIPT_NAME -m <archive_file> [-y] [--force] [--open] Mount archive to managed directory"
       echo " $SCRIPT_NAME -u <archive_file | mountpoint> [--force] Unmount archive and cleanup"
       echo " $SCRIPT_NAME --list-mounts List all active mounts"
+      echo " $SCRIPT_NAME --cancel <archive_file> Stop a run that holds this archive"
       echo ""
       echo "Options:"
       echo " -o, --output <file> Specify output filename (default: <first_source>.sqsh)"
@@ -617,7 +629,8 @@ parse_arguments() {
       echo " -k, --kio       KIO service-menu mode: args are file:// URIs; multi-source output uses 'archive-*' naming"
       echo " --open          With -m: show the mounts folder in the desktop's file manager"
       echo " --print-mountpoint  With -m: print the new mountpoint alone on stdout, logs to stderr"
-      echo " --pipe Machine-readable mode: percentages to stdout, logs to stderr"
+      echo " --cancel          Stop the extraction/build/mount currently holding this archive"
+      echo " --pipe Machine-readable mode: progress lines to stdout (bare percentages and 'phase <name>' markers), logs to stderr"
       echo " -h, --help Show this help message"
       exit 0
       ;;
@@ -641,7 +654,7 @@ parse_arguments() {
   done
 
   case $action in
-  check | mount | unmount)
+  check | mount | unmount | cancel)
     if [[ -z $action_arg ]]; then
       if [[ ${#SOURCES[@]} -eq 1 ]]; then
         action_arg="${SOURCES[0]}"
@@ -653,6 +666,10 @@ parse_arguments() {
   esac
 
   case "$action" in
+  cancel)
+    cancel_archive "$(realpath "$(uri_to_path "$action_arg")")" || exit 1
+    exit 0
+    ;;
   check)
     run_check "$action_arg" "SquashFS Archival"
     ;;
@@ -688,12 +705,17 @@ parse_arguments() {
 #######################################
 
 main() {
+  install_cancel_trap
   parse_arguments "$@"
   check_dependencies
   if [[ $ASK_BUILD -eq 1 ]]; then
     ask_build_options
   fi
   determine_output_filename
+
+  # One operation per archive: the output path is the archive being written, so a
+  # build contends with an extraction or mount of the same file.
+  acquire_archive_lock "$OUTPUT_FILE" || exit $?
 
   local exit_code=0
 
