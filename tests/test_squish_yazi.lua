@@ -325,15 +325,67 @@ assert(notif_has("Extraction failed"), "a real failure still reports failure")
 assert(last_level() == "error", "a real failure is an error")
 FAKE_STATUS = nil
 
+-- ── build cancel: `n c` on the source stops the build the plugin started ────
+-- The lock is keyed on the output archive and shared by both scripts, so the
+-- existing unsquish cancel command is the right way to stop a build as well. The
+-- plugin only has to remember which target it started.
+DRY = true
 reset()
-cx.active.current.hovered = { url = d1 .. "/x.txt", name = "x.txt", cha = { is_dir = false } }
+local bdir = os.tmpname()
+os.remove(bdir)
+os.execute("mkdir -p " .. shquote(bdir))
+cx.active.selected = { bdir }
+M.entry(nil, { args = { "build" } })
+reset()
+cx.active.current.hovered = { url = bdir, name = "bdir", cha = { is_dir = true } }
 M.entry(nil, { args = { "cancel" } })
-assert(notif_has("Select a .sqsh file"), "cancel on non-sqsh rejects NEED_SQSH")
+assert((last_cmd() or ""):match("unsquish%.sh%s+%-%-cancel%s+" .. shquote(bdir .. ".sqsh")),
+  "cancel of a remembered build targets its output archive")
+DRY = false
+
+-- A plugin that never started a build has nothing to cancel, so a directory under
+-- the cursor is still a refusal rather than a guess about what is running.
+reset()
+cx.active.current.hovered = { url = bdir, name = "bdir", cha = { is_dir = true } }
+local fresh = dofile(YAZI .. "/main.lua")
+fresh.setup(nil, { squish_cmd = SRC .. "/squish.sh", unsquish_cmd = SRC .. "/unsquish.sh", timeout = 1 })
+fresh.entry(nil, { args = { "cancel" } })
+assert(notif_has("Select a .sqsh file"), "cancel with no remembered build refuses")
+
+-- ── verify: `squish --check <file>` ───────────────────────────────────────────
+-- KDE's context menu has Verify; without this the plugin has no way to check a
+-- checksum it did not just write.
+DRY = true
+reset()
+cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
+M.entry(nil, { args = { "verify" } })
+assert((last_cmd() or ""):match("squish%.sh%s+%-%-check%s+" .. shquote(d1 .. ".sqsh")),
+  "verify command built as `squish --check <file>`")
+DRY = false
+
+reset()
+FAKE_STATUS = 0
+cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
+M.entry(nil, { args = { "verify" } })
+assert(notif_has("Checksum verified"), "a matching checksum notifies verified")
+assert(last_level() == "info", "a verified checksum is not an error")
+FAKE_STATUS = nil
+
+reset()
+FAKE_STATUS = 1
+cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
+M.entry(nil, { args = { "verify" } })
+assert(notif_has("Checksum mismatch"), "a failed checksum notifies mismatch")
+assert(last_level() == "error", "a failed checksum is an error")
+FAKE_STATUS = nil
 
 -- ── unknown action / missing action ───────────────────────────────────────
 reset()
 M.entry(nil, { args = {} })
 assert(notif_has("Usage:"), "missing action shows USAGE")
+-- USAGE is the only place a user learns the actions exist; it must name every one.
+assert(notif_has("unmount-tracked") and notif_has("jump") and notif_has("verify"),
+  "USAGE lists every action the plugin accepts")
 reset()
 M.entry(nil, { args = { "bogus" } })
 assert(notif_has("Unknown action: bogus"), "unknown action reported")
@@ -342,7 +394,7 @@ assert(notif_has("Unknown action: bogus"), "unknown action reported")
 -- behind means a suite run dirties the machine and a later run sees an earlier archive.
 os.execute("rm -rf " .. shquote(RUNTIME) .. " " .. shquote(d1) .. " " .. shquote(d1 .. ".sqsh") .. " " ..
   shquote(d1 .. ".sqsh.sha256") .. " " .. shquote(parent) .. " " .. shquote(d2) .. " " ..
-  shquote(d2 .. ".sqsh") .. " " .. shquote(emitter) .. " /tmp/extract_pick_dir")
+  shquote(d2 .. ".sqsh") .. " " .. shquote(emitter) .. " " .. shquote(bdir) .. " /tmp/extract_pick_dir")
 
 if fails == 0 then
   print("OK: " .. arg[0]:match("[^/]+$"))

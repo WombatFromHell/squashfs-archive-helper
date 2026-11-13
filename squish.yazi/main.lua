@@ -12,6 +12,7 @@ local NOTIFY_IDS = {
 	MOUNT = "squish-mount",
 	UNMOUNT = "squish-unmount",
 	CANCEL = "squish-cancel",
+	VERIFY = "squish-verify",
 }
 
 local MESSAGES = {
@@ -29,6 +30,9 @@ local MESSAGES = {
 	UNMOUNT_SUCCESS = "Unmounted successfully",
 	UNMOUNT_ERROR = "Unmount failed",
 	START_UNMOUNT = "Attempting to unmount...",
+	START_VERIFY = "Verifying checksum...",
+	VERIFY_SUCCESS = "Checksum verified",
+	VERIFY_ERROR = "Checksum mismatch",
 	START_CANCEL = "Cancelling...",
 	CANCEL_SUCCESS = "Cancellation requested",
 	CANCEL_ERROR = "Nothing to cancel",
@@ -42,7 +46,7 @@ local MESSAGES = {
 	UNKNOWN_ACTION = function(a)
 		return "Unknown action: " .. a
 	end,
-	USAGE = "Usage: squish -- <build|extract|extract-pick|mount|unmount|cancel>",
+	USAGE = "Usage: squish -- <build|extract|extract-pick|verify|mount|unmount|unmount-tracked|jump|cancel>",
 	CMD_FAILED = "Failed to execute command",
 }
 
@@ -51,6 +55,11 @@ local CONFIG = {
 	squish_cmd = DEFAULT_SQUISH_CMD,
 	unsquish_cmd = DEFAULT_UNSQUISH_CMD,
 }
+
+-- The output archive the last build was told to write. A build's lock is keyed on
+-- that path and both scripts share it, so naming it is enough to stop a build whose
+-- output does not exist yet.
+local last_build_target
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Sync context for accessing cx
@@ -199,6 +208,10 @@ local function build_unmount_cmd(file_url)
 	return string.format("%s -u %s", CONFIG.squish_cmd, ya.quote(file_url))
 end
 
+local function build_verify_cmd(file_url)
+	return string.format("%s --check %s", CONFIG.squish_cmd, ya.quote(file_url))
+end
+
 local function build_cancel_cmd(file_url)
 	return string.format("%s --cancel %s", CONFIG.unsquish_cmd, ya.quote(file_url))
 end
@@ -341,6 +354,7 @@ local function run_build(items)
 		target = parent .. "/archive-" .. os.date("%Y%m%d") .. ".sqsh"
 	end
 	local cmd = build_squish_cmd(items, target)
+	last_build_target = target
 	run_progress_op(
 		cmd,
 		NOTIFY_IDS.BUILD,
@@ -471,6 +485,14 @@ local ACTIONS = {
 		end
 		run_extract_pick(h.url)
 	end,
+	verify = function()
+		local h = get_validated_hovered()
+		if not h then
+			return
+		end
+		run_simple_command(build_verify_cmd(h.url), NOTIFY_IDS.VERIFY, MESSAGES.START_VERIFY,
+			MESSAGES.VERIFY_SUCCESS, MESSAGES.VERIFY_ERROR)
+	end,
 	mount = function()
 		local h = get_validated_hovered()
 		if not h then
@@ -488,12 +510,21 @@ local ACTIONS = {
 	-- ponytail: cancellation asks the CLI to stop the run holding this archive;
 	-- yazi's start_kill would only SIGTERM the shell and orphan unsquashfs.
 	cancel = function()
-		local h = get_validated_hovered()
-		if not h then
+		local h = get_hovered()
+		-- A .sqsh under the cursor names the archive to stop. Anything else stops the
+		-- build this plugin started: its output archive is the lock key and does not
+		-- exist yet, so there is nothing to validate against.
+		if h and validate_hovered(h) then
+			run_simple_command(build_cancel_cmd(h.url), NOTIFY_IDS.CANCEL, MESSAGES.START_CANCEL,
+				MESSAGES.CANCEL_SUCCESS, MESSAGES.CANCEL_ERROR, true)
 			return
 		end
-		run_simple_command(build_cancel_cmd(h.url), NOTIFY_IDS.CANCEL, MESSAGES.START_CANCEL,
-			MESSAGES.CANCEL_SUCCESS, MESSAGES.CANCEL_ERROR, true)
+		if last_build_target then
+			run_simple_command(build_cancel_cmd(last_build_target), NOTIFY_IDS.CANCEL, MESSAGES.START_CANCEL,
+				MESSAGES.CANCEL_SUCCESS, MESSAGES.CANCEL_ERROR, true)
+			return
+		end
+		notify(MESSAGES.NEED_SQSH, "error")
 	end,
 	["unmount-tracked"] = function()
 		run_unmount_tracked()

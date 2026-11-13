@@ -19,6 +19,11 @@ run = "plugin squish -- cancel"
 desc = "Squash Cancel a running operation"
 
 [[mgr.prepend_keymap]]
+on = ["n", "v"]
+run = "plugin squish -- verify"
+desc = "Squash Verify checksum"
+
+[[mgr.prepend_keymap]]
 on = ["n", "m"]
 run = "plugin squish -- mount"
 desc = "Squash Mount"

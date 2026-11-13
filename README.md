@@ -15,6 +15,7 @@ A set of bash wrappers with KDE service-menu integration for managing SquashFS a
 - `squashfs-tools` (`mksquashfs`, `unsquashfs`)
 - `squashfuse` (for mounting)
 - `coreutils` (`sha256sum`)
+- `util-linux` (`mountpoint`, to drop mountpoints that are no longer mounted)
 - `yad` or `zenity` (optional, for GUI progress)
 - `pv` (optional, for byte-by-byte hash progress in `--pipe` mode)
 
@@ -37,6 +38,12 @@ squish -m backup.sqsh
 
 # Unmount an archive and cleanup mountpoints
 squish -u backup.sqsh
+
+# Check a checksum without mounting or extracting (KDE: "Verify")
+squish --check backup.sqsh
+
+# List managed mountpoints, dropping the ones no longer mounted
+squish --list-mounts
 
 # Mount and open the mounts folder in the desktop's own file manager
 squish -m --open backup.sqsh
@@ -92,9 +99,9 @@ next command. A build cancelled during its checksum keeps the archive it already
 wrote — it simply has no `.sha256` pair.
 
 The yazi plugin refuses the same way, shows which process is busy, and offers `n c` to
-stop an extract or mount of the archive under the cursor. A build is locked by its
-output archive, which does not exist yet, so stop a build from a terminal:
-`squish --cancel /path/to/output.sqsh`.
+stop the squish operation it started — the extract or mount of the archive under the
+cursor, or a build, whose output archive is the lock key and does not exist yet. From a
+terminal, name the output path directly: `squish --cancel /path/to/output.sqsh`.
 
 ## Installation
 
@@ -129,5 +136,7 @@ To remove all installed files, run:
 
 ## Development
 
+- `make test`: Runs the `bats` suite and the yazi plugin tests (`luajit`, skipped if absent).
+- `make lint`: Runs shellcheck over `src/`, `assets/` and `tests/`.
 - `make package`: Creates a reproducible, versioned tarball in the `artifact/` directory.
 - `make format`: Formats all shell scripts and markdown files.
