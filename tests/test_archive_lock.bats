@@ -319,6 +319,30 @@ lock_entries() { find "$XDG_RUNTIME_DIR/squish-locks" -name pid | wc -l; }
   grep -q "Nothing running" <<<"$OUT"
 }
 
+# install.sh symlinks the scripts as `squish`/`unsquish`, so a run's cmdline names
+# those, not squish.sh: ownership has to come from the lock, not the command line.
+@test "--cancel stops a run invoked under the installed names" {
+  mkdir -p "$WORK/bin" "$WORK/plain"
+  printf 'hello\n' >"$WORK/plain/a.txt"
+  ln -s "$SRC/squish.sh" "$WORK/bin/squish"
+  ln -s "$SRC/unsquish.sh" "$WORK/bin/unsquish"
+  stub_slow_emitters
+  use_stub_dir
+
+  (cd "$WORK" && exec "$WORK/bin/squish" --pipe "$WORK/plain" -o "$WORK/new.sqsh" >"$WORK/run.out" 2>"$WORK/run.err") &
+  START_PID=$!
+  wait_for_lock
+
+  run_unsquish_in "$WORK" --cancel
+  [[ $RC -eq 0 ]]
+  grep -q "Cancelling" <<<"$OUT"
+
+  FIRST_RC=0
+  wait "$START_PID" || FIRST_RC=$?
+  [[ $FIRST_RC -eq 2 ]]
+  [[ $(lock_entries) -eq 0 ]]
+}
+
 @test "--cancel with no argument refuses to guess between two live runs" {
   new_archive
   cp "$WORK/a.sqsh" "$WORK/b.sqsh"

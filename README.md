@@ -69,8 +69,13 @@ this). A `phase <name>` line marks each phase, bare integers are percentages, an
 line goes to stderr:
 
 ```bash
-unsquish --pipe backup.sqsh   # 'phase hash', hash percentages, then 'phase extract'
+unsquish --pipe backup.sqsh   # 'phase hashfile-read', 'phase hash', hash %, 'phase extract'
+squish --pipe src -o out.sqsh # 'phase hash', hash %, 'phase hashfile-write'
 ```
+
+The hash-file phases carry no percentages — writing or reading the `.sha256` is instant —
+so a renderer shows the label alone: the plugin reports `Reading hash file...` and
+`Writing hash file...`.
 
 ### One archive at a time
 
@@ -92,16 +97,21 @@ output is cleaned up:
 
 ```bash
 unsquish --cancel backup.sqsh   # or: squish --cancel backup.sqsh
+unsquish --cancel               # stop whichever run you hold; refuses if several are running
 ```
 
 A cancelled run exits `2`; a stale lock left by a killed process is reclaimed by the
 next command. A build cancelled during its checksum keeps the archive it already
 wrote — it simply has no `.sha256` pair.
 
-The yazi plugin refuses the same way, shows which process is busy, and offers `n c` to
-stop the squish operation it started — the extract or mount of the archive under the
-cursor, or a build, whose output archive is the lock key and does not exist yet. From a
-terminal, name the output path directly: `squish --cancel /path/to/output.sqsh`.
+With no archive named, `--cancel` asks the lock root who is running: exactly one live
+squish run is stopped, and two or more are refused with every archive listed rather than
+guessed.
+
+In yazi, `n c` cancels as a **shell** action, not a plugin action: yazi queues plugin jobs
+behind a running one, so a plugin cancel cannot fire while a build or extraction is in
+flight. The binding ships in `squish.yazi/keymap.example.toml`; `n v` verifies a checksum
+(`squish --pipe --check`) and reports the same progress the build and extract actions show.
 
 ## Installation
 

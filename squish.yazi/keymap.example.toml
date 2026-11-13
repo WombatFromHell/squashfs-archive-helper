@@ -13,10 +13,14 @@ on = ["n", "X"]
 run = "plugin squish -- extract-pick"
 desc = "Squash Extract (pick path)"
 
+# Cancel is a shell action, not a plugin action: yazi queues plugin jobs behind a
+# running one, so a plugin cancel never fires while a build is in flight. A bare
+# `unsquish --cancel` asks the CLI's lock root who is running: it stops that run, and
+# refuses (naming every archive) when several are running.
 [[mgr.prepend_keymap]]
 on = ["n", "c"]
-run = "plugin squish -- cancel"
-desc = "Squash Cancel a running operation"
+run = "shell -- $HOME/.local/bin/unsquish --cancel --block"
+desc = "Squash Cancel the run in flight"
 
 [[mgr.prepend_keymap]]
 on = ["n", "v"]

@@ -232,7 +232,7 @@ cancel_archive() {
   # A lock is a pid number, and a number proves nothing about who owns it: one
   # recycled after a hard kill would be the user's browser.
   cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
-  if [[ $cmd != *squish.sh* && $cmd != *unsquish.sh* ]]; then
+  if ! is_squish_run "$cmd"; then
     log error "Lock pid $pid is not a squish run; refusing to kill it."
     return 1
   fi
@@ -270,7 +270,7 @@ cancel_running() {
       continue
     fi
     cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
-    [[ $cmd == *squish.sh* || $cmd == *unsquish.sh* ]] || continue
+    is_squish_run "$cmd" || continue
     key="${dir##*/}"
     paths+=("$(lock_key_to_path "$key")")
     n=$((n + 1))
@@ -302,6 +302,14 @@ cancel_or_exit() {
     cancel_running || exit 1
   fi
   exit 0
+}
+
+# Usage: is_squish_run <cmdline>
+# Ownership of a lock is proved by the owner's command line naming the script, under
+# whichever name it was invoked with: squish.sh, the installed symlink `squish`, or a
+# `sh -c "squish ..."` from a GUI caller such as the yazi plugin.
+is_squish_run() {
+  [[ $1 =~ (^|[[:space:]/])(squish|unsquish)(\.sh)?([[:space:]]|$) ]]
 }
 
 #######################################
