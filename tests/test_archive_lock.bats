@@ -294,3 +294,25 @@ lock_entries() { find "$XDG_RUNTIME_DIR/squish-locks" -name pid | wc -l; }
   root="$(env -u XDG_RUNTIME_DIR bash -c "source '$SRC/squish-common.sh'; runtime_root")"
   [[ $root == "/tmp/squish-$(id -u)" ]]
 }
+
+# A lock root that cannot be created is not a busy archive. Pointing the runtime dir at a
+# read-only directory (or one another user created first) currently falls through to the
+# busy branch and tells the user to retry an operation nobody is holding, forever.
+@test "an unwritable lock root fails instead of reporting busy" {
+  mkdir -p "$WORK/plain"
+  printf 'hello\n' >"$WORK/plain/a.txt"
+  chmod 0500 "$WORK/run"
+  run_squish_in "$WORK" --pipe "$WORK/plain" -o "$WORK/new.sqsh"
+  chmod 0700 "$WORK/run"
+  [[ $RC -eq 1 ]]
+  [[ "$OUT" == *"Cannot create the lock directory"* ]]
+  [[ "$OUT" != *"is starting"* ]]
+  [[ ! -e "$WORK/run/squish-locks" ]]
+  [[ ! -e "$WORK/new.sqsh" ]]
+}
+
+# The scratch dir holds the lock root; bats deletes the run tmpdir, so the mode must not
+# stay read-only even when an assertion above fails.
+teardown() {
+  chmod 0700 "$WORK/run" 2>/dev/null || true
+}

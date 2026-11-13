@@ -178,11 +178,18 @@ release_archive_lock() {
 # The lock is a symlink to the owner's pid: `ln` claims it atomically with the
 # pid already recorded, so a second run can never read a half-written lock and
 # steal it. A lock whose pid is gone is stale and gets reclaimed. Returns 3 when
-# another run holds it — busy refuses rather than queues.
+# another run holds it — busy refuses rather than queues — and 1 when the lock root
+# itself cannot be created, which is a broken runtime dir, not a busy archive.
 acquire_archive_lock() {
   local dir pid
   dir="$(lock_dir_for "$1")"
-  mkdir -p "$dir"
+  # A lock root we cannot create is not a busy archive: falling through to the busy
+  # branch would tell the user to retry an operation nobody is holding. Locking is
+  # what keeps two runs off one archive, so a run that cannot lock must not run.
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    log error "Cannot create the lock directory '$dir'. Set XDG_RUNTIME_DIR to a writable directory."
+    return 1
+  fi
 
   if ln -s "$BASHPID" "$dir/pid" 2>/dev/null; then
     LOCK_PID="$dir/pid"
