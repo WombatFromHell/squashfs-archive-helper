@@ -28,6 +28,14 @@ local function shquote(s)
   return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
 end
 
+-- The suite runs the real scripts, which need a writable lock/tracker root. Inheriting the
+-- caller's XDG_RUNTIME_DIR made `make test` pass in a login session and fail wherever that
+-- directory is read-only (sandbox, CI, cron) — and the failure blamed a busy archive.
+local RUNTIME = os.tmpname()
+os.remove(RUNTIME)
+os.execute("mkdir -p " .. shquote(RUNTIME))
+local ENV_PREFIX = "XDG_RUNTIME_DIR=" .. shquote(RUNTIME) .. " "
+
 -- ── yazi runtime stubs ───────────────────────────────────────────────────────
 local NOTIFS = {}
 local LEVELS = {}
@@ -122,7 +130,7 @@ Command = setmetatable({}, {
         }
       end
       local outf, errf, codef = os.tmpname(), os.tmpname(), os.tmpname()
-      os.execute("sh -c " .. shquote(cmd)
+      os.execute(ENV_PREFIX .. "sh -c " .. shquote(cmd)
         .. " > " .. shquote(outf) .. " 2> " .. shquote(errf)
         .. "; printf %d $? > " .. shquote(codef))
       local function rd(f)
@@ -329,6 +337,12 @@ assert(notif_has("Usage:"), "missing action shows USAGE")
 reset()
 M.entry(nil, { args = { "bogus" } })
 assert(notif_has("Unknown action: bogus"), "unknown action reported")
+
+-- Real archives, real extracts and the lock root all live under /tmp; leaving them
+-- behind means a suite run dirties the machine and a later run sees an earlier archive.
+os.execute("rm -rf " .. shquote(RUNTIME) .. " " .. shquote(d1) .. " " .. shquote(d1 .. ".sqsh") .. " " ..
+  shquote(d1 .. ".sqsh.sha256") .. " " .. shquote(parent) .. " " .. shquote(d2) .. " " ..
+  shquote(d2 .. ".sqsh") .. " " .. shquote(emitter) .. " /tmp/extract_pick_dir")
 
 if fails == 0 then
   print("OK: " .. arg[0]:match("[^/]+$"))
