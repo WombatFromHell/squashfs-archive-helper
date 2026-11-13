@@ -1,5 +1,5 @@
 PROJECT = squashfs-archive-helper
-VERSION = 1.6.7
+VERSION = 1.6.8
 #
 SRC_DIR = src
 ASSET_DIR = assets
@@ -34,7 +34,7 @@ install: build
 	cd $(BUILD_DIR) && ./install.sh
 
 lint:
-	shellcheck ./src/*.sh ./tests/*.bash ./tests/*.bats
+	shellcheck ./src/*.sh ./assets/*.sh ./tests/*.bash ./tests/*.bats
 
 format: lint
 	shfmt -i 2 -w $(SRC_DIR)/*.sh $(ASSET_DIR)/*.sh $(TEST_DIR)/*.bash $(TEST_DIR)/*.bats
