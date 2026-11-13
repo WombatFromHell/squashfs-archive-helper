@@ -86,7 +86,11 @@ generate_checksum() {
   local file="$1" base
   base="$(basename "$file")"
   log info "Generating SHA-256 checksum for '$base'..."
-  hash_with_progress "$file" "SquashFS Archival" || exit 1
+  # Return code 2 also means 'cancelled', so the guard below decides, not exit 1.
+  hash_with_progress "$file" "SquashFS Archival" || {
+    [[ $CANCELLED -eq 1 ]] && return 0
+    exit 1
+  }
   # A cancel that landed during the hash stops here: the archive is complete,
   # but this run does not finish the pair.
   [[ $CANCELLED -eq 1 ]] && return 0
@@ -121,6 +125,9 @@ is_mounted() {
 }
 
 remove_stale_trackers() {
+  # Without 'mountpoint' we cannot tell a dead mount from a live one, so nothing
+  # is removed. --force is the escape hatch in that case, as before.
+  command -v mountpoint >/dev/null 2>&1 || return 0
   local candidates=("$@")
   local candidate mountpoint
   for candidate in "${candidates[@]}"; do
@@ -195,13 +202,19 @@ alloc_tracker_file() {
 
 list_mounts() {
   local candidate mountpoint archive_abs count=0
+  local -a candidates=()
+  mapfile -t candidates < <(all_trackers)
+  # Listing is where a user asks what is mounted, so a mount that died
+  # underneath us is dropped here rather than reported as live.
+  [[ ${#candidates[@]} -gt 0 ]] && remove_stale_trackers "${candidates[@]}"
 
-  while IFS= read -r candidate; do
+  for candidate in "${candidates[@]}"; do
+    [[ -f $candidate ]] || continue
     mountpoint="$(read_tracker_mountpoint "$candidate")"
     archive_abs="$(read_tracker_archive "$candidate")"
     echo "${archive_abs} -> ${mountpoint}"
     ((count++)) || true
-  done < <(all_trackers)
+  done
 
   if [[ $count -eq 0 ]]; then
     log info "No active mounts found."

@@ -1,2 +1,6 @@
 dist
 artifact
+# Agent scratch: planning docs, lens state, code-graph cache.
+.pi/
+.pi-lens.json
+graft/

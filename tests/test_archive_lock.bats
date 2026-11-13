@@ -254,3 +254,43 @@ lock_entries() { find "$XDG_RUNTIME_DIR/squish-locks" -name pid | wc -l; }
   [[ ! -e $MKLOG ]] # mksquashfs never ran
   [[ $(count_trackers) -eq 1 ]]
 }
+# A GUI hash is the same defect as a GUI build: a foreground dialog defers the cancel
+# trap, and a background child ignores SIGTERM, so the hash runs to the end.
+@test "--cancel during a GUI hash stops the hash" {
+  mkdir -p "$WORK/plain"
+  printf 'hello\n' >"$WORK/plain/a.txt"
+  stub_progress_emitters
+  stub_yad_receipt
+  export SLOWPV_SLEEP=3
+  stub_pv_slow
+  export RECEIPT="$WORK/receipt"
+  : >"$WORK/receipt"
+  use_stub_dir
+
+  start "$WORK" squish.sh "$WORK/plain" -o "$WORK/new.sqsh"
+  # The compression model is instant, so the cancel lands inside the hash.
+  attempts=100
+  while ((attempts-- > 0)) && [[ ! -e $WORK/new.sqsh ]]; do sleep 0.05; done
+  [[ -e $WORK/new.sqsh ]]
+
+  cancel_started=$SECONDS
+  run_squish_in "$WORK" --cancel "$WORK/new.sqsh"
+  [[ $RC -eq 0 ]]
+
+  FIRST_RC=0
+  wait "$START_PID" || FIRST_RC=$?
+  [[ $FIRST_RC -eq 2 ]]
+  [[ ! -e "$WORK/new.sqsh.sha256" ]]
+  # The hash model holds for 3s: a run that waited for it did not cancel.
+  ((SECONDS - cancel_started < SLOWPV_SLEEP))
+  run ! pgrep -f "$WORK/stub/pv" >/dev/null
+}
+
+# Without a session runtime directory the fallback must be per-user: a shared
+# /tmp root is owned by whoever creates it first, so every other user's lock,
+# tracker and temp file would fail.
+@test "the runtime fallback is per-user" {
+  local root
+  root="$(env -u XDG_RUNTIME_DIR bash -c "source '$SRC/squish-common.sh'; runtime_root")"
+  [[ $root == "/tmp/squish-$(id -u)" ]]
+}

@@ -66,6 +66,21 @@ make_archive
   grep -qF "$WORK/data/one.sqsh -> $mounts_dir/one.01.mounted" <<<"$OUT"
 }
 
+# A mount that died leaves its tracker behind, and listing is where a user finds
+# out what is mounted, so the sweep belongs there rather than only on --force.
+@test "a tracker whose mount died is dropped when mounts are listed" {
+  run_squish -m one.sqsh
+  [[ $RC -eq 0 ]]
+  [[ $(count_trackers) -eq 1 ]]
+  unmark_mount "$mounts_dir/one.01.mounted" # the mount died underneath us
+
+  run_squish --list-mounts
+  [[ $RC -eq 0 ]]
+  [[ $(count_trackers) -eq 0 ]]
+  [[ ! -d "$mounts_dir/one.01.mounted" ]]
+  grep -q "No active mounts found" <<<"$OUT"
+}
+
 @test "the mountpoint is the same whatever folder the command runs in" {
   run_squish_in "$WORK" -m "$WORK/data/one.sqsh"
   [[ $RC -eq 0 ]]

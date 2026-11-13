@@ -138,7 +138,9 @@ show_progress() {
 
 # Locks and mount trackers share one per-user runtime dir, so the rule is written
 # once here: a change to it moves both together.
-runtime_root() { echo "${XDG_RUNTIME_DIR:-/tmp}"; }
+# The per-user root. A shared /tmp fallback would be owned by whoever creates it
+# first, so every other user's lock, tracker and temp file would fail.
+runtime_root() { echo "${XDG_RUNTIME_DIR:-/tmp/squish-$(id -u)}"; }
 
 # Locks live in the same per-user runtime dir as the mount trackers, so a lock
 # never sits next to the archive (it would show up in listings and cannot be
@@ -500,8 +502,18 @@ hash_with_progress() {
     # go to sha256sum, so the progress stream is handed out on fd 4.
     printf 'phase hash\n'
     exec 4>&1
-    pv -n -i 0.5 -- "$file" 2>&4 | sha256sum >"$tmp" || rc=$?
+    # Backgrounded so a cancel lands during the hash instead of after it: a
+    # foreground pipeline defers the trap, and a background child ignores SIGTERM.
+    pv -n -i 0.5 -- "$file" 2>&4 | sha256sum >"$tmp" &
+    local pid=$!
+    BACKEND_PID="$pid"
+    wait "$pid" || rc=$?
+    BACKEND_PID=""
     exec 4>&-
+    if [[ $CANCELLED -eq 1 ]]; then
+      rm -f "$tmp"
+      return 2
+    fi
     if [[ $rc -ne 0 ]]; then
       rm -f "$tmp"
       return 1
@@ -516,7 +528,10 @@ hash_with_progress() {
     mkfifo "$fifo"
     pv -n "$file" 2>"$fifo" | sha256sum >"$tmp" &
     local pid=$!
-    if ! yad --progress \
+    BACKEND_PID="$pid"
+    # The dialog is a background job too: a foreground dialog defers the cancel
+    # trap until it closes, so the hash would run to the end.
+    yad --progress \
       --title="$title" \
       --text="Hashing '$(basename "$file")'..." \
       --percentage=0 \
@@ -524,7 +539,20 @@ hash_with_progress() {
       --center \
       --width=450 \
       --borders=15 \
-      --bar-style=normal <"$fifo"; then
+      --bar-style=normal <"$fifo" &
+    local dialog_pid=$!
+    local dialog_exit=0
+    wait "$dialog_pid" || dialog_exit=$?
+    BACKEND_PID=""
+
+    if [[ $CANCELLED -eq 1 ]]; then
+      kill -- -"$dialog_pid" -"$pid" 2>/dev/null || true
+      wait "$dialog_pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      rm -f "$fifo" "$tmp"
+      return 2
+    fi
+    if [[ $dialog_exit -ne 0 ]]; then
       kill -- -"$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
       rm -f "$fifo" "$tmp"
