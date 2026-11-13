@@ -103,6 +103,20 @@ local function notify(content, level, id, timeout)
 	})
 end
 
+-- ponytail: yazi keeps at most three notifications alive and drops the rest, which
+-- would swallow the result of a run. Progress lines therefore live for a second and
+-- at most one is sent per second, leaving room for the final message.
+local NOTICE_TIMEOUT = 1
+local last_notice = 0
+local function notice(content, id)
+	local now = os.time()
+	if now == last_notice then
+		return
+	end
+	last_notice = now
+	notify(content, "info", id, NOTICE_TIMEOUT)
+end
+
 local function is_sqsh_file(path)
 	local lower = path:lower()
 	return lower:match("%.sqsh$") or lower:match("%.squashfs$")
@@ -265,24 +279,23 @@ local function run_with_pipe_progress(cmd_str, notify_id, title_start)
 				err_lines[#err_lines + 1] = msg
 			end
 		else
-			local phase = line and line:match("^phase (%S+)$")
+			-- yazi keeps the trailing newline, so neither `phase` nor a percentage
+			-- matches unless the line is trimmed first.
+			local msg = line and line:match("^%s*(.-)%s*$")
+			local phase = msg and msg:match("^phase (%S+)$")
 			if phase then
 				label = PHASE_LABELS[phase] or title_start
 				last_pct = -1
 				-- A phase that streams nothing (the hash file) is still a step the user
-				-- is waiting on: say it once, then let percentages carry the label.
-				notify(label, "info", notify_id, 2)
+				-- is waiting on: say it once, under its own id, and never hold it back
+				-- behind the percentage throttle.
+				notify(label, "info", notify_id .. ":" .. phase, NOTICE_TIMEOUT)
 			else
-				local pct = tonumber(line)
+				local pct = tonumber(msg)
 				if pct and pct >= 0 and pct <= 100 then
 					local display_pct = math.floor(pct / 20) * 20
 					if (display_pct > last_pct and display_pct > 0) or pct == 100 then
-						notify(
-							string.format("%s %d%%", label, pct == 100 and 100 or display_pct),
-							"info",
-							notify_id,
-							2
-						)
+						notice(string.format("%s %d%%", label, pct == 100 and 100 or display_pct), notify_id)
 						last_pct = display_pct
 					end
 				end
@@ -333,8 +346,11 @@ end
 -- ponytail: build and extract share the same notify/run/refresh/error shape;
 -- this collapses the tail so the two operations only differ by their messages.
 local function run_progress_op(cmd, id, title, start_msg, success_msg, error_msg)
-	notify(start_msg, "info", id)
+	notice(start_msg, id)
 	local success, detail, code = run_with_pipe_progress(cmd, id, title)
+	-- yazi holds three notifications; wait for the status lines to expire so the
+	-- result of the run is the one the user actually sees.
+	ya.sleep(NOTICE_TIMEOUT + 0.1)
 	if success then
 		notify(success_msg, "info", id)
 		ya.emit("refresh", {})

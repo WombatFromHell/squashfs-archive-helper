@@ -39,17 +39,24 @@ local ENV_PREFIX = "XDG_RUNTIME_DIR=" .. shquote(RUNTIME) .. " "
 -- ── yazi runtime stubs ───────────────────────────────────────────────────────
 local NOTIFS = {}
 local LEVELS = {}
+local IDS = {}
 local EMITS = {}
 local DRY = false
 local RECORDED = {}
 local FAKE_POPEN
 local FAKE_STATUS
+local TICK = 0
+-- The plugin's status throttle reads the clock; the suite supplies it so a burst of
+-- lines can still produce one message per step.
+os.time = function() return TICK end
 
 ya = {
   sync = function(fn) return fn end,
+  sleep = function() end,
   notify = function(t)
     NOTIFS[#NOTIFS + 1] = t.content
     LEVELS[#LEVELS + 1] = t.level
+    IDS[#IDS + 1] = t.id
   end,
   emit = function(event) EMITS[#EMITS + 1] = event end,
   quote = shquote,
@@ -139,13 +146,19 @@ Command = setmetatable({}, {
       end
       local out, err, ec = rd(outf), rd(errf), tonumber(rd(codef)) or 1
       local q = {}
-      for l in (out .. "\n"):gmatch("(.-)\n") do q[#q + 1] = { l, 0 } end
-      for l in (err .. "\n"):gmatch("(.-)\n") do q[#q + 1] = { l, 1 } end
+      -- yazi's read_line keeps the trailing newline; a matcher that anchors on `$`
+      -- has to see the same shape the real plugin sees.
+      for l in (out .. "\n"):gmatch("(.-)\n") do q[#q + 1] = { l .. "\n", 0 } end
+      for l in (err .. "\n"):gmatch("(.-)\n") do q[#q + 1] = { l .. "\n", 1 } end
       q[#q + 1] = { "", 2 }
       local i = 0
       return {
         read_line = function()
-          i = i + 1; local e = q[i]; if not e then return nil, 2 end
+          -- One second per line: the plugin throttles status messages to one per
+          -- second, which a real run only reaches because progress is slow.
+          i = i + 1
+          TICK = TICK + 1
+          local e = q[i]; if not e then return nil, 2 end
           return e[1], e[2]
         end,
         wait = function() return { success = ec == 0 } end,
@@ -166,7 +179,7 @@ local M = dofile(YAZI .. "/main.lua")
 M.setup(nil, { squish_cmd = SRC .. "/squish.sh", unsquish_cmd = SRC .. "/unsquish.sh", timeout = 1 })
 
 local function reset()
-  NOTIFS, EMITS, RECORDED, LEVELS = {}, {}, {}, {}
+  NOTIFS, EMITS, RECORDED, LEVELS, IDS = {}, {}, {}, {}, {}
   cx.active.selected, cx.active.current.hovered = {}, nil
 end
 local function last_cmd() return RECORDED[#RECORDED] end
@@ -321,6 +334,8 @@ for i, c in ipairs(NOTIFS) do
   if c:find("Writing hash file", 1, true) then write_at = i end
 end
 assert(hash_at > 0 and write_at > hash_at, "the hash file write is reported after the hash")
+-- Same notification id overwrites: percentages would erase the hash-file message.
+assert(IDS[write_at] ~= IDS[hash_at], "the hash file write gets its own notification")
 
 M.setup(nil, { squish_cmd = check_emitter, unsquish_cmd = check_emitter, timeout = 1 })
 reset()
@@ -335,6 +350,25 @@ for i, c in ipairs(NOTIFS) do
   if c:find("Hashing", 1, true) and vhash_at == 0 then vhash_at = i end
 end
 assert(read_at > 0 and read_at < vhash_at, "the hash file read is reported before the hash")
+assert(IDS[read_at] ~= IDS[vhash_at], "the hash file read gets its own notification")
+
+-- yazi keeps three notifications alive and drops anything beyond that, so a burst of
+-- status lines must collapse into one and leave room for the result.
+local real_time = os.time
+os.time = function() return 1 end
+reset()
+cx.active.selected = { d2 }
+M.entry(nil, { args = { "build" } })
+os.time = real_time
+assert(notif_has("Reading hash file"), "the hash file step is stated even inside a burst")
+assert(notif_has("Built"), "the build result still reaches the user")
+local burst_pcts = 0
+for _, c in ipairs(NOTIFS) do
+	if c:match("%d%%") then
+		burst_pcts = burst_pcts + 1
+	end
+end
+assert(burst_pcts <= 1, "percentages collapse into one status line inside a burst")
 
 -- ── cancel: `unsquish --cancel <file>`, and exit code 2 reads as cancelled ──
 -- Code 2 is what unsquish returns when a run is stopped; telling the user
