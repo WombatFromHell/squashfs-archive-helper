@@ -286,6 +286,63 @@ lock_entries() { find "$XDG_RUNTIME_DIR/squish-locks" -name pid | wc -l; }
   run ! pgrep -f "$WORK/stub/pv" >/dev/null
 }
 
+# A keyboard cancel cannot name the output of a multi-item build (archive-<date>.sqsh, and
+# archive-<date>-N.sqsh after a collision), so --cancel with no argument asks the lock root
+# who is running. One run gets stopped; several are refused and named, never guessed.
+@test "--cancel with no argument stops the single run in flight" {
+  new_archive
+  stub_slow_emitters
+  use_stub_dir
+
+  start "$WORK" unsquish.sh --pipe "$WORK/a.sqsh" -o "$WORK/out1"
+  wait_for_lock
+
+  run_unsquish_in "$WORK" --cancel
+  [[ $RC -eq 0 ]]
+  grep -q "Cancelling" <<<"$OUT"
+
+  FIRST_RC=0
+  wait "$START_PID" || FIRST_RC=$?
+  [[ $FIRST_RC -eq 2 ]]
+  [[ ! -e $WORK/out1 ]]
+  [[ $(lock_entries) -eq 0 ]]
+}
+
+@test "--cancel with no argument reports nothing running" {
+  run_unsquish_in "$WORK" --cancel
+  [[ $RC -eq 1 ]]
+  grep -q "Nothing running" <<<"$OUT"
+}
+
+@test "--cancel with no argument refuses to guess between two live runs" {
+  new_archive
+  cp "$WORK/a.sqsh" "$WORK/b.sqsh"
+  cp "$WORK/a.sqsh.sha256" "$WORK/b.sqsh.sha256"
+  stub_slow_emitters
+  use_stub_dir
+
+  start "$WORK" unsquish.sh --pipe "$WORK/a.sqsh" -o "$WORK/out1"
+  wait_for_lock
+  FIRST_PID=$START_PID
+  start "$WORK" unsquish.sh --pipe "$WORK/b.sqsh" -o "$WORK/out2"
+  attempts=100
+  while ((attempts-- > 0)) && [[ $(lock_entries) -lt 2 ]]; do sleep 0.05; done
+  [[ $(lock_entries) -eq 2 ]]
+
+  run_unsquish_in "$WORK" --cancel
+  [[ $RC -eq 1 ]]
+  grep -q "operations are running" <<<"$OUT"
+  grep -q "$WORK/a.sqsh" <<<"$OUT"
+  grep -q "$WORK/b.sqsh" <<<"$OUT"
+  run ! grep -q "Cancelling" <<<"$OUT"
+
+  # Neither run was signalled: the refusal names them and leaves both alone.
+  kill -0 "$FIRST_PID"
+  kill -0 "$START_PID"
+  kill -TERM "$FIRST_PID" "$START_PID"
+  wait "$FIRST_PID" "$START_PID" 2>/dev/null || true
+}
+
 # Without a session runtime directory the fallback must be per-user: a shared
 # /tmp root is owned by whoever creates it first, so every other user's lock,
 # tracker and temp file would fail.
@@ -315,4 +372,10 @@ lock_entries() { find "$XDG_RUNTIME_DIR/squish-locks" -name pid | wc -l; }
 # stay read-only even when an assertion above fails.
 teardown() {
   chmod 0700 "$WORK/run" 2>/dev/null || true
+  # A failed assertion must not leave a run holding the runtime dir.
+  local pid
+  for pid in "${START_PID:-}" "${FIRST_PID:-}"; do
+    [[ -n $pid ]] && kill -TERM "$pid" 2>/dev/null || true
+  done
+  return 0
 }

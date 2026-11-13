@@ -634,7 +634,7 @@ parse_arguments() {
       echo " $SCRIPT_NAME -m <archive_file> [-y] [--force] [--open] Mount archive to managed directory"
       echo " $SCRIPT_NAME -u <archive_file | mountpoint> [--force] Unmount archive and cleanup"
       echo " $SCRIPT_NAME --list-mounts List all active mounts"
-      echo " $SCRIPT_NAME --cancel <archive_file> Stop a run that holds this archive"
+      echo " $SCRIPT_NAME --cancel [archive_file] Stop a run that holds this archive"
       echo ""
       echo "Options:"
       echo " -o, --output <file> Specify output filename (default: <first_source>.sqsh)"
@@ -645,7 +645,7 @@ parse_arguments() {
       echo " -k, --kio       KIO service-menu mode: args are file:// URIs; multi-source output uses 'archive-*' naming"
       echo " --open          With -m: show the mounts folder in the desktop's file manager"
       echo " --print-mountpoint  With -m: print the new mountpoint alone on stdout, logs to stderr"
-      echo " --cancel          Stop the extraction/build/mount currently holding this archive"
+      echo " --cancel          Stop the run holding an archive; with no archive, stop the single run in flight"
       echo " --pipe Machine-readable mode: progress lines to stdout (bare percentages and 'phase <name>' markers), logs to stderr"
       echo " -h, --help Show this help message"
       exit 0

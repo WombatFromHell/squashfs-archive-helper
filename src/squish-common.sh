@@ -241,11 +241,61 @@ cancel_archive() {
   kill -TERM "$pid"
 }
 
-# Usage: cancel_or_exit <archive-path>
-# The shared --cancel tail of both scripts: resolve a possible KIO URI, stop
-# whoever holds the lock, and make the outcome this run's exit code.
+# Usage: lock_key_to_path <lock-dir-name>
+# Undo lock_dir_for's escaping: a doubled '__' is a literal '_' that was escaped, so it goes
+# to a placeholder first, every remaining '_' is a '/', then the placeholder comes back.
+lock_key_to_path() {
+  local key="${1//__/$'\x01'}"
+  key="${key//_//}"
+  printf '%s' "${key//$'\x01'/_}"
+}
+
+# Usage: cancel_running
+# --cancel with no archive, for a caller that cannot name one: a keyboard binding pressed
+# mid-build does not know which dated output a multi-item build chose. The lock root already
+# records who is running, so exactly one live squish run is stopped. Several are refused and
+# named rather than guessed, and a lock naming something that is not a squish run is ignored.
+cancel_running() {
+  local root dir key pid cmd paths=() n=0
+  root="$(lock_root)"
+  for dir in "$root"/*/; do
+    dir="${dir%/}"
+    # The pid entry is a symlink whose target is a number, not a file, so test the link.
+    [[ -L "$dir/pid" ]] || continue
+    pid="$(readlink "$dir/pid" 2>/dev/null || true)"
+    [[ -n $pid ]] && lock_pid_alive "$pid" || continue
+    cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+    [[ $cmd == *squish.sh* || $cmd == *unsquish.sh* ]] || continue
+    key="${dir##*/}"
+    paths+=("$(lock_key_to_path "$key")")
+    n=$((n + 1))
+  done
+
+  if ((n == 0)); then
+    log error "Nothing running for this user."
+    return 1
+  fi
+  if ((n > 1)); then
+    log error "$n squish operations are running; --cancel needs one of them named:"
+    for dir in "${paths[@]}"; do
+      log error "  $dir"
+    done
+    return 1
+  fi
+
+  cancel_archive "${paths[0]}"
+}
+
+# Usage: cancel_or_exit [archive-path]
+# The shared --cancel tail of both scripts: with a path, resolve a possible KIO URI and stop
+# whoever holds that lock; without one, ask the lock root who is running. Either way the
+# outcome is this run's exit code.
 cancel_or_exit() {
-  cancel_archive "$(realpath "$(uri_to_path "$1")")" || exit 1
+  if [[ -n $1 ]]; then
+    cancel_archive "$(realpath "$(uri_to_path "$1")")" || exit 1
+  else
+    cancel_running || exit 1
+  fi
   exit 0
 }
 

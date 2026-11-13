@@ -160,13 +160,13 @@ parse_arguments() {
       echo "  $SCRIPT_NAME <archive.sqsh> [-o output_dir] [-y]  Extract archive"
       echo "  $SCRIPT_NAME --check <archive_file>              Verify archive integrity"
       echo "  $SCRIPT_NAME --list <archive_file>               List archive contents"
-      echo "  $SCRIPT_NAME --cancel <archive_file>             Stop a run that holds this archive"
+      echo "  $SCRIPT_NAME --cancel [archive_file]             Stop a run that holds this archive"
       echo ""
       echo "Options:"
       echo "  -o, --output <dir>    Specify extraction directory (default: archive stem)"
       echo "  -y, --yes             Skip checksum verification errors"
       echo "  --pipe                Machine-readable mode: progress lines to stdout (bare percentages and 'phase <name>' markers), logs to stderr"
-      echo "  --cancel            Stop the extraction/build/mount currently holding this archive"
+      echo "  --cancel            Stop the run holding an archive; with no archive, stop the single run in flight"
       echo "  -h, --help            Show this help message"
       exit 0
       ;;
@@ -182,11 +182,9 @@ parse_arguments() {
   done
 
   if [[ $action == cancel ]]; then
+    # No archive named means "stop the run I am holding", not a missing argument.
     if [[ -z $action_arg && -n $INPUT_FILE ]]; then
       action_arg="$INPUT_FILE"
-    fi
-    if [[ -z $action_arg ]]; then
-      missing_option_value "--cancel"
     fi
     cancel_or_exit "$action_arg"
   fi
