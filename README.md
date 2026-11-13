@@ -108,10 +108,11 @@ With no archive named, `--cancel` asks the lock root who is running: exactly one
 squish run is stopped, and two or more are refused with every archive listed rather than
 guessed.
 
-In yazi, `n c` cancels as a **shell** action, not a plugin action: yazi queues plugin jobs
-behind a running one, so a plugin cancel cannot fire while a build or extraction is in
-flight. The binding ships in `squish.yazi/keymap.example.toml`; `n v` verifies a checksum
-(`squish --pipe --check`) and reports the same progress the build and extract actions show.
+In yazi, `n c` cancels as a **shell** action with `--orphan`, not a plugin action: yazi
+queues plugin and shell jobs behind a running one, so a cancel without `--orphan` only
+fires once the build ends. The binding ships in `squish.yazi/keymap.example.toml`; `n v`
+verifies a checksum (`squish --pipe --check`) and reports the same progress the build and
+extract actions show.
 
 ## Installation
 
