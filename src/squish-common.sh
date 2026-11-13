@@ -263,7 +263,12 @@ cancel_running() {
     # The pid entry is a symlink whose target is a number, not a file, so test the link.
     [[ -L "$dir/pid" ]] || continue
     pid="$(readlink "$dir/pid" 2>/dev/null || true)"
-    [[ -n $pid ]] && lock_pid_alive "$pid" || continue
+    if [[ -z $pid ]]; then
+      continue
+    fi
+    if ! lock_pid_alive "$pid"; then
+      continue
+    fi
     cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
     [[ $cmd == *squish.sh* || $cmd == *unsquish.sh* ]] || continue
     key="${dir##*/}"

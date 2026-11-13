@@ -56,11 +56,6 @@ local CONFIG = {
 	unsquish_cmd = DEFAULT_UNSQUISH_CMD,
 }
 
--- The output archive the last build was told to write. A build's lock is keyed on
--- that path and both scripts share it, so naming it is enough to stop a build whose
--- output does not exist yet.
-local last_build_target
-
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Sync context for accessing cx
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -209,11 +204,17 @@ local function build_unmount_cmd(file_url)
 end
 
 local function build_verify_cmd(file_url)
-	return string.format("%s --check %s", CONFIG.squish_cmd, ya.quote(file_url))
+	-- --pipe so the hash phase and the hash-file phases reach this plugin as progress.
+	return string.format("%s --pipe --check %s", CONFIG.squish_cmd, ya.quote(file_url))
 end
 
 local function build_cancel_cmd(file_url)
-	return string.format("%s --cancel %s", CONFIG.unsquish_cmd, ya.quote(file_url))
+	if file_url then
+		return string.format("%s --cancel %s", CONFIG.unsquish_cmd, ya.quote(file_url))
+	end
+	-- No archive named: the CLI's lock root answers who is running, which is the only
+	-- honest question when a build's dated output does not exist yet.
+	return string.format("%s --cancel", CONFIG.unsquish_cmd)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -238,7 +239,11 @@ end
 -- ponytail: squish/unsquish mark each progress phase with a `phase <name>` line
 -- on stdout. Bare percentages alone cannot say which phase they belong to, and
 -- a second phase would be suppressed by the first phase's last_pct.
-local PHASE_LABELS = { hash = "Hashing:" }
+local PHASE_LABELS = {
+	hash = "Hashing:",
+	["hashfile-read"] = "Reading hash file...",
+	["hashfile-write"] = "Writing hash file...",
+}
 
 local function run_with_pipe_progress(cmd_str, notify_id, title_start)
 	local child, err = Command("sh"):arg({ "-c", cmd_str }):stdout(Command.PIPED):stderr(Command.PIPED):spawn()
@@ -264,6 +269,9 @@ local function run_with_pipe_progress(cmd_str, notify_id, title_start)
 			if phase then
 				label = PHASE_LABELS[phase] or title_start
 				last_pct = -1
+				-- A phase that streams nothing (the hash file) is still a step the user
+				-- is waiting on: say it once, then let percentages carry the label.
+				notify(label, "info", notify_id, 2)
 			else
 				local pct = tonumber(line)
 				if pct and pct >= 0 and pct <= 100 then
@@ -354,7 +362,6 @@ local function run_build(items)
 		target = parent .. "/archive-" .. os.date("%Y%m%d") .. ".sqsh"
 	end
 	local cmd = build_squish_cmd(items, target)
-	last_build_target = target
 	run_progress_op(
 		cmd,
 		NOTIFY_IDS.BUILD,
@@ -490,8 +497,8 @@ local ACTIONS = {
 		if not h then
 			return
 		end
-		run_simple_command(build_verify_cmd(h.url), NOTIFY_IDS.VERIFY, MESSAGES.START_VERIFY,
-			MESSAGES.VERIFY_SUCCESS, MESSAGES.VERIFY_ERROR)
+		run_progress_op(build_verify_cmd(h.url), NOTIFY_IDS.VERIFY, "Verifying:",
+			MESSAGES.START_VERIFY, MESSAGES.VERIFY_SUCCESS, MESSAGES.VERIFY_ERROR)
 	end,
 	mount = function()
 		local h = get_validated_hovered()
@@ -511,20 +518,12 @@ local ACTIONS = {
 	-- yazi's start_kill would only SIGTERM the shell and orphan unsquashfs.
 	cancel = function()
 		local h = get_hovered()
-		-- A .sqsh under the cursor names the archive to stop. Anything else stops the
-		-- build this plugin started: its output archive is the lock key and does not
-		-- exist yet, so there is nothing to validate against.
-		if h and validate_hovered(h) then
-			run_simple_command(build_cancel_cmd(h.url), NOTIFY_IDS.CANCEL, MESSAGES.START_CANCEL,
-				MESSAGES.CANCEL_SUCCESS, MESSAGES.CANCEL_ERROR, true)
-			return
-		end
-		if last_build_target then
-			run_simple_command(build_cancel_cmd(last_build_target), NOTIFY_IDS.CANCEL, MESSAGES.START_CANCEL,
-				MESSAGES.CANCEL_SUCCESS, MESSAGES.CANCEL_ERROR, true)
-			return
-		end
-		notify(MESSAGES.NEED_SQSH, "error")
+		-- A .sqsh under the cursor names the archive to stop. Anything else cannot name
+		-- one — a build's dated output may not exist yet, and async plugin contexts are
+		-- isolated, so this job never saw the build it is being asked to stop. Ask the
+		-- CLI who holds a lock: it stops one run and refuses when several are running.
+		run_simple_command(build_cancel_cmd(h and validate_hovered(h) and h.url), NOTIFY_IDS.CANCEL,
+			MESSAGES.START_CANCEL, MESSAGES.CANCEL_SUCCESS, MESSAGES.CANCEL_ERROR, true)
 	end,
 	["unmount-tracked"] = function()
 		run_unmount_tracked()

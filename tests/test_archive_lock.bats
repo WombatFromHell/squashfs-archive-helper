@@ -3,6 +3,11 @@
 # archive path, so a build, an extraction and a mount of the same archive never
 # overlap. Busy means refused (exit 3), never queued.
 
+# bats runs teardown in the same subshell as the test, so the started pids set
+# inside a test are visible there — the warning that they are subshell-local is
+# a false positive for this harness (verified with a probe file).
+# shellcheck disable=SC2030,SC2031
+
 # shellcheck source=tests/helpers.bash
 source "$(dirname -- "${BATS_TEST_FILENAME:?set}")/helpers.bash"
 # shellcheck source=tests/stubs.bash

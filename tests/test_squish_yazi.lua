@@ -295,6 +295,47 @@ M.entry(nil, { args = { "mount" } })
 assert(notif_has("Hashing: 40%"), "mount shows hash progress instead of a stray dialog")
 assert(notif_has("Mounted successfully"), "mount (emitter) notifies success")
 
+-- ── hash file phases reach the user ────────────────────────────────────────
+-- The hash file is read before the hash in a verify and written after it in a build.
+-- Neither step streams percentages, so a bare `phase` marker has to notify on its own.
+local build_emitter = os.tmpname()
+local bf = io.open(build_emitter, "w")
+bf:write("#!/bin/sh\nprintf 'phase hash\\n10\\n50\\n100\\nphase hashfile-write\\n'\n")
+bf:close()
+os.execute("chmod +x " .. shquote(build_emitter))
+local check_emitter = os.tmpname()
+local cf = io.open(check_emitter, "w")
+cf:write("#!/bin/sh\nprintf 'phase hashfile-read\\nphase hash\\n10\\n50\\n100\\n'\n")
+cf:close()
+os.execute("chmod +x " .. shquote(check_emitter))
+
+M.setup(nil, { squish_cmd = build_emitter, unsquish_cmd = build_emitter, timeout = 1 })
+reset()
+cx.active.selected = { d2 }
+M.entry(nil, { args = { "build" } })
+assert(notif_has("Hashing: 100%"), "build (hash-file emitter) still reports hash progress")
+assert(notif_has("Writing hash file"), "build reports the hash file being written")
+local hash_at, write_at = 0, 0
+for i, c in ipairs(NOTIFS) do
+  if c:find("Hashing", 1, true) and hash_at == 0 then hash_at = i end
+  if c:find("Writing hash file", 1, true) then write_at = i end
+end
+assert(hash_at > 0 and write_at > hash_at, "the hash file write is reported after the hash")
+
+M.setup(nil, { squish_cmd = check_emitter, unsquish_cmd = check_emitter, timeout = 1 })
+reset()
+cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
+M.entry(nil, { args = { "verify" } })
+assert(notif_has("Reading hash file"), "verify reports the hash file being read")
+assert(notif_has("Hashing: 40%"), "verify streams hash progress instead of a silent wait")
+assert(notif_has("Checksum verified"), "verify (emitter) notifies verified")
+local read_at, vhash_at = 0, 0
+for i, c in ipairs(NOTIFS) do
+  if c:find("Reading hash file", 1, true) then read_at = i end
+  if c:find("Hashing", 1, true) and vhash_at == 0 then vhash_at = i end
+end
+assert(read_at > 0 and read_at < vhash_at, "the hash file read is reported before the hash")
+
 -- ── cancel: `unsquish --cancel <file>`, and exit code 2 reads as cancelled ──
 -- Code 2 is what unsquish returns when a run is stopped; telling the user
 -- "Extraction failed" over a partial directory they just cancelled is a lie.
@@ -325,32 +366,32 @@ assert(notif_has("Extraction failed"), "a real failure still reports failure")
 assert(last_level() == "error", "a real failure is an error")
 FAKE_STATUS = nil
 
--- ── build cancel: `n c` on the source stops the build the plugin started ────
--- The lock is keyed on the output archive and shared by both scripts, so the
--- existing unsquish cancel command is the right way to stop a build as well. The
--- plugin only has to remember which target it started.
+-- ── build cancel: a hovered .sqsh names the archive; anything else asks the CLI ──
+-- Async plugin contexts are isolated, so a cancel job cannot remember the build a
+-- different job started, and a multi-item build's dated output may not exist yet.
+-- The lock root knows who is running, so a bare --cancel is the honest question.
 DRY = true
 reset()
 local bdir = os.tmpname()
 os.remove(bdir)
 os.execute("mkdir -p " .. shquote(bdir))
-cx.active.selected = { bdir }
-M.entry(nil, { args = { "build" } })
-reset()
 cx.active.current.hovered = { url = bdir, name = "bdir", cha = { is_dir = true } }
 M.entry(nil, { args = { "cancel" } })
-assert((last_cmd() or ""):match("unsquish%.sh%s+%-%-cancel%s+" .. shquote(bdir .. ".sqsh")),
-  "cancel of a remembered build targets its output archive")
+assert((last_cmd() or ""):match("unsquish%.sh%s+%-%-cancel$"),
+  "cancel with no archive under the cursor sends a bare --cancel")
+reset()
+cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
+M.entry(nil, { args = { "cancel" } })
+assert((last_cmd() or ""):match("unsquish%.sh%s+%-%-cancel%s+" .. shquote(d1 .. ".sqsh")),
+  "cancel of a hovered .sqsh names that archive")
 DRY = false
 
--- A plugin that never started a build has nothing to cancel, so a directory under
--- the cursor is still a refusal rather than a guess about what is running.
+-- A bare cancel with nothing running is a failure the user hears, not a silent no-op.
 reset()
-cx.active.current.hovered = { url = bdir, name = "bdir", cha = { is_dir = true } }
-local fresh = dofile(YAZI .. "/main.lua")
-fresh.setup(nil, { squish_cmd = SRC .. "/squish.sh", unsquish_cmd = SRC .. "/unsquish.sh", timeout = 1 })
-fresh.entry(nil, { args = { "cancel" } })
-assert(notif_has("Select a .sqsh file"), "cancel with no remembered build refuses")
+cx.active.current.hovered = nil
+M.entry(nil, { args = { "cancel" } })
+assert(notif_has("Nothing running"), "a bare cancel with nothing running reports it")
+assert(last_level() == "error", "a cancel that stopped nothing is an error")
 
 -- ── verify: `squish --check <file>` ───────────────────────────────────────────
 -- KDE's context menu has Verify; without this the plugin has no way to check a
@@ -359,8 +400,8 @@ DRY = true
 reset()
 cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
 M.entry(nil, { args = { "verify" } })
-assert((last_cmd() or ""):match("squish%.sh%s+%-%-check%s+" .. shquote(d1 .. ".sqsh")),
-  "verify command built as `squish --check <file>`")
+assert((last_cmd() or ""):match("squish%.sh%s+%-%-pipe%s+%-%-check%s+" .. shquote(d1 .. ".sqsh")),
+  "verify command built as `squish --pipe --check <file>`")
 DRY = false
 
 reset()
@@ -379,6 +420,16 @@ assert(notif_has("Checksum mismatch"), "a failed checksum notifies mismatch")
 assert(last_level() == "error", "a failed checksum is an error")
 FAKE_STATUS = nil
 
+-- Code 2 from the CLI means the user stopped the verify, not that the archive is corrupt.
+reset()
+FAKE_STATUS = 2
+cx.active.current.hovered = { url = d1 .. ".sqsh", name = "x.sqsh", cha = { is_dir = false } }
+M.entry(nil, { args = { "verify" } })
+assert(notif_has("Cancelled"), "a cancelled verify notifies Cancelled")
+assert(notif_has("Checksum mismatch") == false, "a cancelled verify is not corruption")
+assert(last_level() == "info", "a cancelled verify is not an error")
+FAKE_STATUS = nil
+
 -- ── unknown action / missing action ───────────────────────────────────────
 reset()
 M.entry(nil, { args = {} })
@@ -394,7 +445,8 @@ assert(notif_has("Unknown action: bogus"), "unknown action reported")
 -- behind means a suite run dirties the machine and a later run sees an earlier archive.
 os.execute("rm -rf " .. shquote(RUNTIME) .. " " .. shquote(d1) .. " " .. shquote(d1 .. ".sqsh") .. " " ..
   shquote(d1 .. ".sqsh.sha256") .. " " .. shquote(parent) .. " " .. shquote(d2) .. " " ..
-  shquote(d2 .. ".sqsh") .. " " .. shquote(emitter) .. " " .. shquote(bdir) .. " /tmp/extract_pick_dir")
+  shquote(d2 .. ".sqsh") .. " " .. shquote(emitter) .. " " .. shquote(build_emitter) .. " " ..
+  shquote(check_emitter) .. " " .. shquote(bdir) .. " /tmp/extract_pick_dir")
 
 if fails == 0 then
   print("OK: " .. arg[0]:match("[^/]+$"))
