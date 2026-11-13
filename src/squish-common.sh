@@ -469,6 +469,9 @@ verify_checksum_pair() {
 
   log info "Verifying '$target_basename' against '$checksum_file'..."
 
+  # Reading the hash file is the first step of a verify; a pipe consumer hears it
+  # before the archive's own hash starts streaming percentages.
+  [[ $PROGRESS_PIPE -eq 1 ]] && printf 'phase hashfile-read\n'
   expected="$(head -n1 "$checksum_abs" | awk '{print $1}')"
   hash_with_progress "$archive_abs" "$ui_title" || hash_rc=$?
   actual="$HASH_RESULT"

@@ -78,6 +78,41 @@ make_pair() { # an archive plus its checksum, as the mount suite models it
   [[ $(pct_after_marker "phase hash") -gt 0 ]]
 }
 
+# The hash file is the other half of the pair, and it is the step a user watches
+# for: a build writing it and a verify reading it must say so on the pipe stream,
+# not stay silent while the archive's own hash streams percentages.
+@test "squish --pipe reports the hash file being written" {
+  make_tree
+  run_pipe squish.sh --pipe "$WORK/tree" -o "$WORK/d.sqsh"
+  [[ $RC -eq 0 ]]
+  [[ $(grep -c '^phase hashfile-write$' <<<"$OUT") -eq 1 ]]
+  [[ $(grep -n '^phase hash$' <<<"$OUT" | cut -d: -f1) -lt $(grep -n '^phase hashfile-write$' <<<"$OUT" | cut -d: -f1) ]]
+  grep -qE '^[0-9a-f]{64}  d\.sqsh$' "$WORK/d.sqsh.sha256"
+  run ! grep -q '^phase ' "$WORK/err"
+}
+
+@test "unsquish --pipe --check reports the hash file being read" {
+  make_tree
+  run_pipe squish.sh --pipe "$WORK/tree" -o "$WORK/e.sqsh"
+  run_pipe unsquish.sh --pipe --check "$WORK/e.sqsh"
+  [[ $RC -eq 0 ]]
+  [[ $(grep -c '^phase hashfile-read$' <<<"$OUT") -eq 1 ]]
+  [[ $(grep -n '^phase hashfile-read$' <<<"$OUT" | cut -d: -f1) -lt $(grep -n '^phase hash$' <<<"$OUT" | cut -d: -f1) ]]
+  grep -q 'VERIFIED' "$WORK/err"
+  run ! grep -q '^phase ' "$WORK/err"
+}
+
+@test "hash file phases appear when pv is missing" {
+  make_tree
+  rm "$WORK/stub/pv"
+  PATH="$WORK/stub:/usr/bin:/bin" run_pipe squish.sh --pipe "$WORK/tree" -o "$WORK/f.sqsh"
+  [[ $RC -eq 0 ]]
+  [[ $(grep -c '^phase hashfile-write$' <<<"$OUT") -eq 1 ]]
+  PATH="$WORK/stub:/usr/bin:/bin" run_pipe unsquish.sh --pipe --check "$WORK/f.sqsh"
+  [[ $RC -eq 0 ]]
+  [[ $(grep -c '^phase hashfile-read$' <<<"$OUT") -eq 1 ]]
+}
+
 @test "hashing stays silent and correct when pv is missing" {
   make_tree
   # No pv anywhere on PATH: the stub model is removed and the PATH is narrowed

@@ -94,6 +94,9 @@ generate_checksum() {
   # A cancel that landed during the hash stops here: the archive is complete,
   # but this run does not finish the pair.
   [[ $CANCELLED -eq 1 ]] && return 0
+  # The hash file is the half the user waits for after the archive's own hash
+  # ends, so a pipe consumer gets a marker for the write as well as for the hash.
+  [[ $PROGRESS_PIPE -eq 1 ]] && printf 'phase hashfile-write\n'
   printf '%s  %s\n' "$HASH_RESULT" "$base" >"${file}.sha256"
 }
 
