@@ -99,15 +99,42 @@ EOF
   [[ $RC -eq 7 ]]
 }
 
-@test "a cancelled dialog reports its own exit code" {
-  cat >"$WORK/stub/cancelling" <<'EOF'
+@test "a dismissed dialog cancels the build: exit 2, and the tool dies with it" {
+  export RUNLOG="$WORK/run.log"
+  # squish.sh runs under `set -m`; without monitor mode bash hands a background job no
+  # process group of its own, so the cancel kill would hit nothing.
+  set -m
+  for code in 0 1 252; do # dialog gone mid-build: a WM close answering 0, Cancel, or Esc
+    stub_slow_emitters    # the model holds, and writes 'end' only if it runs to completion
+    cat >"$WORK/stub/dismissing" <<DIALOG
 #!/usr/bin/env bash
-exit 3
+read -r line # like the real dialog: it waits for progress, then the user closes it
+exit $code
+DIALOG
+    chmod +x "$WORK/stub/dismissing"
+    RC=0
+    run_with_dialog "$WORK/stub/mksquashfs" "$WORK/tree" "$WORK/x.sqsh" -- "$WORK/stub/dismissing" 2>/dev/null || RC=$?
+    [[ $RC -eq 2 ]]
+    grep -q '^start' "$RUNLOG"
+    run ! grep -q '^end' "$RUNLOG"                    # the backend never reached its final line
+    run ! pgrep -f "$WORK/stub/mksquashfs" >/dev/null # the tool is gone, not left to finish
+  done
+}
+
+@test "a failing backend still reports its own code after the dialog closes" {
+  cat >"$WORK/stub/failing" <<'EOF'
+#!/usr/bin/env bash
+printf 'Progress 7 done\n'
+exit 7
 EOF
-  chmod +x "$WORK/stub/cancelling"
+  cat >"$WORK/stub/closed" <<'EOF'
+#!/usr/bin/env bash
+exit 1 # yad's Cancel button, pressed after the tool died
+EOF
+  chmod +x "$WORK/stub/failing" "$WORK/stub/closed"
   RC=0
-  run_with_dialog "$WORK/stub/mksquashfs" "$WORK/x" -- "$WORK/stub/cancelling" 2>/dev/null || RC=$?
-  [[ $RC -eq 3 ]]
+  run_with_dialog "$WORK/stub/failing" -- "$WORK/stub/closed" 2>/dev/null || RC=$?
+  [[ $RC -eq 7 ]]
 }
 
 @test "squish GUI compression feeds its progress dialog" {
@@ -125,4 +152,30 @@ EOF
   bash "$SRC/unsquish.sh" "$WORK/e2e.sqsh" -o "$WORK/e2e-out" 2>"$WORK/e2e-out-err" >/dev/null
   run ! grep -qE '^[0-9]+$' "$WORK/e2e-out-err"
   [[ $(first_block_ints) =~ [0-9] ]]
+}
+
+# The percentages must arrive as they are produced, not all at the end: a buffered
+# stage in the chain would leave the gauge frozen at 0% for the whole build.
+@test "percentages reach the dialog while the backend is still working" {
+  export RUN_END="$WORK/end" RECORD="$WORK/rec"
+  cat >"$WORK/stub/slow" <<'EOF'
+#!/usr/bin/env bash
+printf '10\n'; sleep 0.4
+printf '50\n'; sleep 0.4
+printf '100\n'
+date +%s.%N >"$RUN_END"
+EOF
+  cat >"$WORK/stub/timed" <<'EOF'
+#!/usr/bin/env bash
+while IFS= read -r line; do printf '%s %s\n' "$(date +%s.%N)" "$line"; done >"$RECORD"
+EOF
+  chmod +x "$WORK/stub/slow" "$WORK/stub/timed"
+
+  run_with_dialog "$WORK/stub/slow" -- "$WORK/stub/timed" 2>/dev/null
+
+  awk -v end_file="$WORK/end" '
+    FNR == 1 { getline end < end_file }
+    $2 == 50 { mid = $1 }
+    END { exit (mid != "" && mid <= end - 0.3) ? 0 : 1 }
+  ' "$RECORD"
 }

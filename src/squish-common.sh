@@ -97,7 +97,9 @@ dialog_args() {
   DIALOG_ARGS=()
   case "$ui" in
   yad)
-    DIALOG_ARGS=(yad --progress --title="$title" --text="$text" --percentage=0 --auto-close --center --width=450 --borders=15 --bar-style=normal)
+    # Declaring Cancel (exit code 1) also drops yad's default OK button, whose exit 0
+    # reads as completion and lets the build run on.
+    DIALOG_ARGS=(yad --progress --title="$title" --text="$text" --percentage=0 --auto-close --center --width=450 --borders=15 --bar-style=normal --button=Cancel:1)
     ;;
   zenity)
     DIALOG_ARGS=(zenity --progress --title="$title" --text="$text" --percentage=0 --auto-close)
@@ -119,7 +121,16 @@ show_progress() {
     pipe_progress "${BACKEND_ARGS[@]}"
     ;;
   cli)
-    "${BACKEND_ARGS[@]}"
+    # Backgrounded like every other renderer: in the foreground, `set -m` gives the
+    # tool its own process group, so Ctrl-C never reaches it and the cancel trap only
+    # runs after the tool has finished the whole build.
+    "${BACKEND_ARGS[@]}" &
+    BACKEND_PID=$!
+    local rc=0
+    wait "$BACKEND_PID" || rc=$?
+    BACKEND_PID=""
+    [[ $CANCELLED -eq 1 ]] && return 2
+    return "$rc"
     ;;
   yad | zenity)
     dialog_args "$RENDERER" "$title" "$text" || return 1
@@ -387,22 +398,29 @@ run_with_dialog() {
   fifo=$(mktemp -u)
   mkfifo "$fifo"
 
-  (
-    local rc=0
-    "${backend[@]}" 2>&1 || rc=$?
-    echo "$rc" >"$status_file"
-  ) | tee >(grep -v -E '^[0-9]+$' >&2) | grep --line-buffered -E '^[0-9]+$' |
-    {
-      # ponytail: keep draining after the dialog closes at 100% so the backend
-      # never sees a broken pipe mid-final-write; drop overruns after the reader
-      # (yad/zenity) is gone. Open the fifo once; per-line opens would block.
-      trap '' PIPE
-      exec 3>"$fifo"
-      while IFS= read -r p; do printf '%s\n' "$p" >&3 2>/dev/null || :; done
-    } &
+  # The whole pipeline is ONE background job. `set -m` gives every element of a bare
+  # pipeline its own process group and `$!` names only the last element, so a bare
+  # pipeline's `$!` is never the group the tool lives in. Wrapped, `$!` is the group
+  # leader and a cancel reaches mksquashfs itself instead of only the drain.
+  {
+    (
+      local rc=0
+      "${backend[@]}" 2>&1 || rc=$?
+      echo "$rc" >"$status_file"
+    ) | tee >(grep -v -E '^[0-9]+$' >&2) | grep --line-buffered -E '^[0-9]+$' |
+      {
+        # ponytail: keep draining after the dialog closes at 100% so the backend
+        # never sees a broken pipe mid-final-write; drop overruns after the reader
+        # (yad/zenity) is gone. Open the fifo once; per-line opens would block.
+        trap '' PIPE
+        exec 3>"$fifo"
+        while IFS= read -r p; do printf '%s\n' "$p" >&3 2>/dev/null || :; done
+      }
+  } &
   pipe_pid=$!
-  # The dialog's backend is this pipeline, so the cancel trap has to aim at the
-  # drain: killing it propagates SIGPIPE drain -> grep -> tee -> backend.
+  # The dialog's backend is this pipeline's process group, so the cancel trap aims at
+  # it. SIGPIPE alone is not enough: the tool's stdout is a pipe, so its C library
+  # buffers progress lines and it may never write again, and never see the signal.
   BACKEND_PID="$pipe_pid"
 
   # A dialog in the foreground would defer the cancel trap until it closes, so
@@ -425,17 +443,35 @@ run_with_dialog() {
     return 2
   fi
 
-  if [[ $dialog_exit -ne 0 ]]; then
-    # ponytail: killing the pipeline's group suffices; SIGPIPE propagates
-    # drain -> grep -> tee -> backend and kills it.
+  # A dialog that vanishes while the tool is still working is the user stopping the run,
+  # whatever code it exits with: yad answers 1 for its Cancel button and 252 for Esc or a
+  # window close, but a window manager on Wayland can answer 0. Give the tool a moment to
+  # record an exit first, so an auto-close at 100% is still read as success.
+  local cmd_exit dismissed=0
+  cmd_exit="$(cat "$status_file" 2>/dev/null || true)"
+  if [[ $dialog_exit -eq 0 && -z $cmd_exit ]]; then
+    local settle=20
+    while ((settle-- > 0)) && [[ -z $cmd_exit ]]; do
+      sleep 0.05
+      cmd_exit="$(cat "$status_file" 2>/dev/null || true)"
+    done
+    [[ -z $cmd_exit ]] && dismissed=1
+  fi
+
+  if [[ $dismissed -eq 1 || $dialog_exit -ne 0 ]]; then
+    # Kill the pipeline's group, then answer cancelled unless the tool had already
+    # recorded a failure of its own. The code is read before the kill, so a killed
+    # backend's 143 never replaces the user's cancel.
     kill -- -"$pipe_pid" 2>/dev/null || true
     wait "$pipe_pid" 2>/dev/null || true
     rm -f "$status_file" "$fifo"
-    return "$dialog_exit"
+    [[ -n $cmd_exit ]] && return "$cmd_exit"
+    # Callers decide on this flag, not on the code: a dismissed dialog is a cancel.
+    CANCELLED=1
+    return 2
   fi
 
   wait "$pipe_pid" || true
-  local cmd_exit
   cmd_exit=$(cat "$status_file")
   rm -f "$status_file" "$fifo"
 
@@ -592,27 +628,34 @@ hash_with_progress() {
       return 1
     fi
   elif [[ $RENDERER == pipe ]] || ! command -v pv &>/dev/null; then
-    sha256sum -- "$file" >"$tmp" || {
+    # Backgrounded like the branch above: a foreground hash defers the cancel trap
+    # until the whole file is hashed, so Ctrl-C finished the verification instead of
+    # stopping it.
+    sha256sum -- "$file" >"$tmp" &
+    local pid=$!
+    BACKEND_PID="$pid"
+    wait "$pid" || rc=$?
+    BACKEND_PID=""
+    if [[ $CANCELLED -eq 1 ]]; then
+      rm -f "$tmp"
+      return 2
+    fi
+    if [[ $rc -ne 0 ]]; then
       rm -f "$tmp"
       return 1
-    }
+    fi
   elif [[ $RENDERER == yad ]]; then
     fifo="$(mktemp -u)"
     mkfifo "$fifo"
-    pv -n "$file" 2>"$fifo" | sha256sum >"$tmp" &
+    # One job, so one process group: `set -m` splits a bare pipeline into a group per
+    # element and `$!` names only the last, so the cancel kill would miss pv.
+    { pv -n "$file" 2>"$fifo" | sha256sum >"$tmp"; } &
     local pid=$!
     BACKEND_PID="$pid"
     # The dialog is a background job too: a foreground dialog defers the cancel
     # trap until it closes, so the hash would run to the end.
-    yad --progress \
-      --title="$title" \
-      --text="Hashing '$(basename "$file")'..." \
-      --percentage=0 \
-      --auto-close \
-      --center \
-      --width=450 \
-      --borders=15 \
-      --bar-style=normal <"$fifo" &
+    dialog_args yad "$title" "Hashing '$(basename "$file")'..."
+    "${DIALOG_ARGS[@]}" <"$fifo" &
     local dialog_pid=$!
     local dialog_exit=0
     wait "$dialog_pid" || dialog_exit=$?
@@ -625,10 +668,21 @@ hash_with_progress() {
       rm -f "$fifo" "$tmp"
       return 2
     fi
-    if [[ $dialog_exit -ne 0 ]]; then
+    # Same contract as run_with_dialog: a dialog gone while pv is still hashing is a
+    # cancel, so the empty hash decides, not the dialog's code (a window manager can
+    # answer 0). A written hash means the dialog closed at 100% and the run succeeded.
+    local dismissed=0
+    if [[ $dialog_exit -eq 0 && ! -s "$tmp" ]]; then
+      local settle=20
+      while ((settle-- > 0)) && [[ ! -s "$tmp" ]]; do sleep 0.05; done
+      [[ ! -s "$tmp" ]] && dismissed=1
+    fi
+    if [[ $dismissed -eq 1 || $dialog_exit -ne 0 ]]; then
       kill -- -"$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
       rm -f "$fifo" "$tmp"
+      # Same flag, so a dismissed hash gauge reports a cancel, not a failed hash.
+      CANCELLED=1
       return 2
     fi
     if ! wait "$pid"; then
@@ -637,10 +691,20 @@ hash_with_progress() {
     fi
     rm -f "$fifo"
   else
-    pv "$file" | sha256sum >"$tmp" || {
+    # Same shape: the hash has to be cancellable while it is running, not after.
+    pv "$file" | sha256sum >"$tmp" &
+    local pid=$!
+    BACKEND_PID="$pid"
+    wait "$pid" || rc=$?
+    BACKEND_PID=""
+    if [[ $CANCELLED -eq 1 ]]; then
+      rm -f "$tmp"
+      return 2
+    fi
+    if [[ $rc -ne 0 ]]; then
       rm -f "$tmp"
       return 1
-    }
+    fi
   fi
   HASH_RESULT="$(awk '{print $1}' "$tmp")"
   rm -f "$tmp"

@@ -100,6 +100,24 @@ generate_checksum() {
   printf '%s  %s\n' "$HASH_RESULT" "$base" >"${file}.sha256"
 }
 
+# Usage: hash_archive <archive>
+# --hash re-runs the build's hash flow on an existing archive: recompute and
+# rewrite its .sha256 pair. It holds the archive lock, so it never races a
+# live build or a second hash writing the same pair.
+hash_archive() {
+  local archive_abs
+  archive_abs="$(realpath "$1")"
+  require_existing_archive "$archive_abs" || exit 1
+  acquire_archive_lock "$archive_abs" || exit $?
+  generate_checksum "$archive_abs"
+  if [[ $CANCELLED -eq 1 ]]; then
+    log warn "Hash cancelled before the checksum was written; '$archive_abs' has no '.sha256' pair."
+    exit 2
+  fi
+  log info "Checksum written to '${archive_abs}.sha256'."
+  exit 0
+}
+
 #######################################
 # TRACKER FILE MANAGEMENT
 #
@@ -574,6 +592,15 @@ parse_arguments() {
         shift
       fi
       ;;
+    --hash)
+      action="hash"
+      if is_option_value "${2:-}"; then
+        action_arg="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
     -y | --yes | --skip-verify)
       SKIP_VERIFY=1
       shift
@@ -634,6 +661,7 @@ parse_arguments() {
       echo "Usage:"
       echo " $SCRIPT_NAME <source1> [source2...] [-o output.sqsh] [-c <n>] [--prompt] Create a new archive"
       echo " $SCRIPT_NAME --check <archive_file> Verify archive integrity"
+      echo " $SCRIPT_NAME --hash <archive_file> Re-hash the archive and rewrite its .sha256 pair"
       echo " $SCRIPT_NAME -m <archive_file> [-y] [--force] [--open] Mount archive to managed directory"
       echo " $SCRIPT_NAME -u <archive_file | mountpoint> [--force] Unmount archive and cleanup"
       echo " $SCRIPT_NAME --list-mounts List all active mounts"
@@ -673,10 +701,12 @@ parse_arguments() {
   done
 
   case $action in
-  check | mount | unmount | cancel)
+  check | mount | unmount | cancel | hash)
     if [[ -z $action_arg ]]; then
       if [[ ${#SOURCES[@]} -eq 1 ]]; then
         action_arg="${SOURCES[0]}"
+      elif [[ $action == cancel ]]; then
+        : # a bare --cancel stops the single run in flight, the way unsquish already does
       else
         missing_option_value "$action"
       fi
@@ -690,6 +720,9 @@ parse_arguments() {
     ;;
   check)
     run_check "$action_arg" "SquashFS Archival"
+    ;;
+  hash)
+    hash_archive "$action_arg"
     ;;
   mount)
     check_squashfuse
@@ -712,6 +745,7 @@ parse_arguments() {
     log error "No source directories specified."
     echo "Usage: $SCRIPT_NAME <source1> [source2 ...] [-o output_file]"
     echo " $SCRIPT_NAME --check <archive_file>"
+    echo " $SCRIPT_NAME --hash <archive_file>"
     echo " $SCRIPT_NAME [-y] -m|--mount <archive_file>"
     echo " $SCRIPT_NAME -u|--unmount <archive_file>"
     exit 1

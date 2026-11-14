@@ -42,6 +42,9 @@ squish -u backup.sqsh
 # Check a checksum without mounting or extracting (KDE: "Verify")
 squish --check backup.sqsh
 
+# Re-hash an archive and rewrite its .sha256 pair
+squish --hash backup.sqsh
+
 # List managed mountpoints, dropping the ones no longer mounted
 squish --list-mounts
 

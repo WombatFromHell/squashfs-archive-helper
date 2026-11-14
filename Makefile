@@ -1,5 +1,5 @@
 PROJECT = squashfs-archive-helper
-VERSION = 1.6.8
+VERSION = 1.6.9
 #
 SRC_DIR = src
 ASSET_DIR = assets
@@ -26,8 +26,9 @@ build: clean
 	install -m 644 LICENSE README.md $(BUILD_DIR)
 	install -d -m 755 $(BUILD_DIR)/squish.yazi
 	install -m 644 $(wildcard squish.yazi/*) $(BUILD_DIR)/squish.yazi
-	# Inject version into scripts
-	sed -i 's/^VERSION="dev"$$/VERSION="$(VERSION)"/' $(BUILD_DIR)/*.sh
+	# Stamp the version into the declaration, which is `declare -r VERSION="dev"`
+	# in the sources: anchoring on `^VERSION=` never matched, so packages shipped "dev".
+	sed -i 's/VERSION="dev"/VERSION="$(VERSION)"/' $(BUILD_DIR)/*.sh
 	@echo "Built $(PROJECT) @ $(VERSION) in $(BUILD_DIR)"
 
 install: build

@@ -213,6 +213,7 @@ lock_entries() { find "$XDG_RUNTIME_DIR/squish-locks" -name pid | wc -l; }
   [[ ! -e $WORK/new.sqsh ]]
   run ! grep -q 'end' "$RUNLOG" # the backend never reached its final line
   [[ $(lock_entries) -eq 0 ]]
+  run ! pgrep -f "$WORK/stub/mksquashfs" >/dev/null # the tool is gone, not left to finish
 }
 
 # A signal during the build's hash must not go on to report a finished build.
@@ -407,4 +408,45 @@ teardown() {
     [[ -n $pid ]] && kill -TERM "$pid" 2>/dev/null || true
   done
   return 0
+}
+
+# The dialog path, not the signal path: closing the hash gauge must cancel the run, and
+# say why, instead of exiting 1 with an archive and no checksum.
+@test "closing the build's hash dialog exits 2 and leaves no half pair" {
+  mkdir -p "$WORK/plain"
+  printf 'hello\n' >"$WORK/plain/a.txt"
+  SLEEP=0.4 stub_slow_emitters
+  SLOWPV_SLEEP=2 stub_pv_slow
+  export DIALOGLOG="$WORK/dialog.log"
+  : >"$DIALOGLOG"
+  stub_yad_dismissing_hash
+  use_stub_dir
+
+  run_squish_in "$WORK" "$WORK/plain" -o "$WORK/new.sqsh"
+  [[ $RC -eq 2 ]]
+  [[ "$OUT" == *"no '.sha256' pair"* ]]
+  [[ -e "$WORK/new.sqsh" ]]
+  [[ ! -e "$WORK/new.sqsh.sha256" ]]
+}
+
+# The build side must accept the same bare --cancel unsquish already does: refusing it
+# leaves the refused run going, and it goes on to hash the archive it was told to stop.
+@test "squish --cancel with no argument stops the single run in flight" {
+  mkdir -p "$WORK/plain"
+  printf 'hello\n' >"$WORK/plain/a.txt"
+  stub_slow_emitters
+  use_stub_dir
+
+  start "$WORK" squish.sh --pipe "$WORK/plain" -o "$WORK/new.sqsh"
+  wait_for_lock
+
+  run_squish_in "$WORK" --cancel
+  [[ $RC -eq 0 ]]
+  grep -q "Cancelling" <<<"$OUT"
+
+  FIRST_RC=0
+  wait "$START_PID" || FIRST_RC=$?
+  [[ $FIRST_RC -eq 2 ]]
+  [[ ! -e "$WORK/new.sqsh" ]]
+  [[ $(lock_entries) -eq 0 ]]
 }

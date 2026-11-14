@@ -91,3 +91,10 @@ emitter_args() {
   grep -q '^100$' "$RECEIPT"
   run ! grep -q 'Parallel model emitter' "$RECEIPT"
 }
+
+@test "the yad gauge declares its Cancel button, so a press cannot read as success" {
+  # Without an explicit button, yad also offers OK, whose exit 0 looks like completion
+  # and lets the build run on. Declaring Cancel:1 pins the dismissal code.
+  dialog_args yad "Squish Archival" "Compressing..."
+  [[ "${DIALOG_ARGS[*]}" == *"--button=Cancel:1"* ]]
+}

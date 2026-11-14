@@ -95,6 +95,15 @@ EOF
   chmod +x "$WORK/stub/yad"
 }
 
+stub_yad_hold() { # a YAD gauge that stays open until it is killed, like the real dialog
+  cat >"$WORK/stub/yad" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" == *--progress* ]] && cat >/dev/null
+exit 1
+EOF
+  chmod +x "$WORK/stub/yad"
+}
+
 stub_yad_argv() { # a YAD window whose argv is inspectable; exits $YAD_EXIT
   export DIALOGLOG
   cat >"$WORK/stub/yad" <<'EOF'
@@ -261,5 +270,21 @@ stub_yad_prompt() { # yad form that answers $PROMPT_REPLY and exits $YAD_EXIT
 [[ "$*" == *--progress* ]] && cat >/dev/null
 exit "${YAD_EXIT:-0}"
 EOF
+  chmod +x "$WORK/stub/yad"
+}
+
+# A yad window that closes itself while the hash is still running, like a real Cancel
+# press, but lets the compression gauge run to 100%.
+stub_yad_dismissing_hash() {
+  cat >"$WORK/stub/yad" <<'YAD'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$DIALOGLOG"
+if [[ "$*" == *Hashing* ]]; then
+  read -r line # one percentage, then the user closes the hash gauge
+  exit 1
+fi
+cat >/dev/null
+exit 0
+YAD
   chmod +x "$WORK/stub/yad"
 }
